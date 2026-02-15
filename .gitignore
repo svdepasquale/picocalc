@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code local state
+.vscode/*.log
+
+# MicroPython device/runtime artifacts
+wifi_credentials.json
+openrouter_config.json
+
+# OS noise
+Thumbs.db
+.DS_Store
