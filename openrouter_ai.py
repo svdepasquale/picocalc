@@ -1,3 +1,5 @@
+import gc
+import os
 import time
 
 try:
@@ -37,8 +39,37 @@ def _load_config():
 
 
 def _save_config(config):
-    with open(CONFIG_FILE, "w") as file:
-        json.dump(config, file)
+    print("Saving config...")
+    tmp_file = CONFIG_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w") as file:
+            json.dump(config, file)
+            try:
+                file.flush()
+            except Exception:
+                pass
+    except Exception as error:
+        print("Save err:", error)
+        return False
+    try:
+        os.sync()
+    except Exception:
+        pass
+    try:
+        os.remove(CONFIG_FILE)
+    except Exception:
+        pass
+    try:
+        os.rename(tmp_file, CONFIG_FILE)
+    except Exception as error:
+        print("Rename err:", error)
+        return False
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    print("Saved.")
+    return True
 
 
 def _set_config_value(key, value, empty_message, saved_message, show_value=False):
