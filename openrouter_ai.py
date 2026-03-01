@@ -16,10 +16,13 @@ DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-02-15.7"
+MODULE_VERSION = "2026-03-01.13"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
+MAX_VIEW_RESPONSES = 5
+VIEW_PREVIEW_CHARS = 180
+_LAST_RESPONSES = []
 PRESET_PROMPTS = {
     "brief": "Reply very concise. Max 4 short bullet points. Plain text.",
     "teacher": "Explain step by step in simple language. Keep each line short.",
@@ -64,10 +67,7 @@ def _save_config(config):
     except Exception as error:
         print("Rename err:", error)
         return False
-    try:
-        gc.collect()
-    except Exception:
-        pass
+    gc.collect()
     print("Saved.")
     return True
 
@@ -145,13 +145,40 @@ def _paged_print(text):
         count += 1
         if count >= PAGE_LINES and index < total - 1:
             try:
-                answer = input("--more-- Enter/q: ").strip().lower()
+                answer = input("--more-- Enter/n/→ next, q/↓ stop: ")
             except Exception:
                 answer = ""
-            if answer == "q":
+            cmd = _normalize_nav_cmd(answer)
+            if cmd == "q":
                 print("(stopped)")
                 break
             count = 0
+
+
+def _normalize_nav_cmd(raw):
+    cmd = str(raw).strip().lower()
+    if cmd == "":
+        return ""
+
+    if cmd in ("\x1b[c", "\x1boc", "right"):
+        return "n"
+    if cmd in ("\x1b[d", "\x1bod", "left"):
+        return "p"
+    if cmd in ("\x1b[a", "\x1boa", "up"):
+        return "d"
+    if cmd in ("\x1b[b", "\x1bob", "down"):
+        return "q"
+
+    if cmd.endswith("[c"):
+        return "n"
+    if cmd.endswith("[d"):
+        return "p"
+    if cmd.endswith("[a"):
+        return "d"
+    if cmd.endswith("[b"):
+        return "q"
+
+    return cmd
 
 
 def _http_module():
@@ -265,8 +292,21 @@ def _extract_text(response_json):
 
 def _history_append(role, content):
     _HISTORY.append({"role": role, "content": content})
-    if len(_HISTORY) > MAX_HISTORY_MESSAGES:
-        del _HISTORY[: len(_HISTORY) - MAX_HISTORY_MESSAGES]
+    while len(_HISTORY) > MAX_HISTORY_MESSAGES:
+        del _HISTORY[0]
+
+
+def _response_append(prompt_text, answer_text, model_name, elapsed_ms):
+    _LAST_RESPONSES.append(
+        {
+            "prompt": _clip(prompt_text, MAX_PROMPT_CHARS),
+            "answer": _clip(answer_text, MAX_OUTPUT_CHARS),
+            "model": str(model_name),
+            "elapsed_ms": int(elapsed_ms),
+        }
+    )
+    while len(_LAST_RESPONSES) > MAX_VIEW_RESPONSES:
+        del _LAST_RESPONSES[0]
 
 
 def mem_clear():
@@ -293,6 +333,84 @@ def mem_status():
     info = {"enabled": _MEMORY_ENABLED, "messages": len(_HISTORY), "max": MAX_HISTORY_MESSAGES}
     print("Mem:", info["enabled"], "msgs:", info["messages"], "/", info["max"])
     return info
+
+
+def responses():
+    if not _LAST_RESPONSES:
+        print("No cached responses.")
+        return []
+
+    print("Responses:")
+    total = len(_LAST_RESPONSES)
+    for index, item in enumerate(_LAST_RESPONSES, start=1):
+        print("{}: {} ({}ms)".format(index, _clip(item.get("model", "?"), 24), item.get("elapsed_ms", 0)))
+        print("   Q:", _clip(item.get("prompt", ""), 44))
+        print("   A:", _clip(item.get("answer", ""), 44))
+    print("Cached:", total, "/", MAX_VIEW_RESPONSES)
+    return _LAST_RESPONSES
+
+
+def resp_clear():
+    _LAST_RESPONSES[:] = []
+    gc.collect()
+    print("Responses cleared.")
+    return True
+
+
+def view(index=1):
+    if not _LAST_RESPONSES:
+        print("No cached responses. Run ask()/chat().")
+        return None
+
+    try:
+        pos = int(index) - 1
+    except Exception:
+        print("Invalid index.")
+        return None
+
+    total = len(_LAST_RESPONSES)
+    if pos < 0 or pos >= total:
+        print("Out of range.")
+        return None
+
+    while True:
+        item = _LAST_RESPONSES[pos]
+        print("---")
+        print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24)))
+        print("ms:", item.get("elapsed_ms", 0))
+        print("Q:")
+        _paged_print(_clip(item.get("prompt", ""), MAX_PROMPT_CHARS))
+        print("A preview:")
+        _paged_print(_clip(item.get("answer", ""), VIEW_PREVIEW_CHARS))
+
+        try:
+            cmd = _normalize_nav_cmd(input("n/p/d/q/#/arrows: "))
+        except Exception:
+            cmd = "q"
+
+        if cmd == "q":
+            return item
+        if cmd == "n":
+            if total > 0:
+                pos = (pos + 1) % total
+            continue
+        if cmd == "p":
+            if total > 0:
+                pos = (pos - 1) % total
+            continue
+        if cmd == "d":
+            print("Answer:")
+            _paged_print(item.get("answer", ""))
+            continue
+
+        try:
+            jump = int(cmd) - 1
+            if 0 <= jump < total:
+                pos = jump
+            else:
+                print("Out of range.")
+        except Exception:
+            print("Use n/p/d/q/# or arrows")
 
 
 def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
@@ -369,6 +487,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
         return None
 
     text = _extract_text(body)
+    del body
     if text is None:
         print("No text in response")
         return None
@@ -380,6 +499,8 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
     print("---")
     print("ms:", elapsed_ms)
 
+    _response_append(prompt_text, text, selected_model, elapsed_ms)
+
     if use_mem:
         _history_append("user", prompt_text)
         _history_append("assistant", text)
@@ -387,7 +508,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
     return text
 
 
-def chat():
+def chat(with_view=False):
     print("AI chat. Empty=exit")
     while True:
         try:
@@ -399,7 +520,13 @@ def chat():
             print("Bye")
             return
 
-        ask(prompt)
+        text = ask(prompt)
+        if with_view and text is not None and _LAST_RESPONSES:
+            view(len(_LAST_RESPONSES))
+
+
+def chat_view():
+    return chat(with_view=True)
 
 
 def ver():
@@ -408,14 +535,19 @@ def ver():
 
 
 def help():
-    print("cmd: ver ask chat")
+    print("cmd: ver ask chat chat_view")
     print("cmd: set_api_key set_model")
     print("cmd: set_system_prompt clear_system_prompt")
     print("cmd: presets preset p")
     print("cmd: mem_on mem_off mem_status mem_clear")
+    print("cmd: responses resp_clear view v")
     print("cmd: show_config help h")
     print("tip: import openrouter_ai as ai")
 
 
 def h():
     return help()
+
+
+def v(index=1):
+    return view(index)
