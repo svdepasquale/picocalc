@@ -56,19 +56,21 @@ def _decode_ssid(raw_ssid):
 
 
 def load_credentials():
-    try:
-        with open(CREDENTIALS_FILE, "r") as file:
-            data = json.load(file)
-            if isinstance(data, dict):
-                return data
-    except (OSError, ValueError):
-        pass
+    for path in (CREDENTIALS_FILE, CREDENTIALS_FILE + ".tmp", CREDENTIALS_FILE + ".bak"):
+        try:
+            with open(path, "r") as file:
+                data = json.load(file)
+                if isinstance(data, dict):
+                    return data
+        except (OSError, ValueError):
+            pass
     return {}
 
 
 def save_credentials(credentials):
     import os as _os
     tmp = CREDENTIALS_FILE + ".tmp"
+    bak = CREDENTIALS_FILE + ".bak"
     try:
         with open(tmp, "w") as file:
             json.dump(credentials, file)
@@ -79,15 +81,32 @@ def save_credentials(credentials):
     except Exception as e:
         print("Save err:", e)
         return False
+    # Remove old backup
     try:
-        _os.remove(CREDENTIALS_FILE)
+        _os.remove(bak)
     except Exception:
         pass
+    # Rename current to backup (so it's never deleted without a replacement ready)
+    try:
+        _os.rename(CREDENTIALS_FILE, bak)
+    except Exception:
+        pass
+    # Rename tmp to main
     try:
         _os.rename(tmp, CREDENTIALS_FILE)
     except Exception as e:
         print("Rename err:", e)
+        # Try to restore from backup
+        try:
+            _os.rename(bak, CREDENTIALS_FILE)
+        except Exception as re:
+            print("Restore err:", re)
         return False
+    # Clean up backup on success
+    try:
+        _os.remove(bak)
+    except Exception:
+        pass
     return True
 
 
