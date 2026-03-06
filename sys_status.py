@@ -104,10 +104,10 @@ def ls(path="/"):
                     print("(stopped)")
                     break
                 line_count = 0
-        return items
+        return len(items)
     except Exception as e:
         print("Err:", e)
-        return []
+        return 0
 
 
 def df():
