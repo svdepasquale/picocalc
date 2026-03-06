@@ -145,7 +145,7 @@ def _paged_print(text):
         count += 1
         if count >= PAGE_LINES and index < total - 1:
             try:
-                answer = input("--more-- Enter/n/→ next, q/↓ stop: ")
+                answer = input("--more-- q=stop: ")
             except Exception:
                 answer = ""
             cmd = _normalize_nav_cmd(answer)
@@ -413,10 +413,19 @@ def view(index=1):
             print("Use n/p/d/q/# or arrows")
 
 
-def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
+def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, raw=False):
     requests = _http_module()
     if requests is None:
         return None
+
+    try:
+        import network
+        w = network.WLAN(network.STA_IF)
+        if not w.isconnected():
+            print("No WiFi. Connect first.")
+            return None
+    except Exception:
+        pass
 
     config = _load_config()
     api_key = config.get("api_key", "")
@@ -505,7 +514,9 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
         _history_append("user", prompt_text)
         _history_append("assistant", text)
 
-    return text
+    if raw:
+        return text
+    return None
 
 
 def chat(with_view=False):
@@ -520,8 +531,8 @@ def chat(with_view=False):
             print("Bye")
             return
 
-        text = ask(prompt)
-        if with_view and text is not None and _LAST_RESPONSES:
+        ask(prompt)
+        if with_view and _LAST_RESPONSES:
             view(len(_LAST_RESPONSES))
 
 

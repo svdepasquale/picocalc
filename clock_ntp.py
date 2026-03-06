@@ -12,6 +12,7 @@ CONFIG_FILE = "clock_config.json"
 MODULE_VERSION = "2026-03-01.2"
 NTP_HOST = "pool.ntp.org"
 DEFAULT_UTC_OFFSET = 0
+MAX_NTP_RETRIES = 2
 
 _timer_start = None
 
@@ -102,15 +103,28 @@ def sync():
         print("Try: import mip; mip.install('ntptime')")
         return False
 
-    ntptime.host = NTP_HOST
-    print("NTP sync...")
     try:
-        ntptime.settime()
-        print("OK. UTC:", _fmt(time.gmtime()))
-        return True
-    except Exception as e:
-        print("Sync err:", e)
-        return False
+        import network
+        w = network.WLAN(network.STA_IF)
+        if not w.isconnected():
+            print("No WiFi. Connect first.")
+            return False
+    except Exception:
+        pass
+
+    ntptime.host = NTP_HOST
+    ntptime.timeout = 5
+    print("NTP sync...")
+    for attempt in range(MAX_NTP_RETRIES):
+        try:
+            ntptime.settime()
+            print("OK. UTC:", _fmt(time.gmtime()))
+            return True
+        except Exception as e:
+            print("Sync err:", e)
+            if attempt < MAX_NTP_RETRIES - 1:
+                print("Retrying...")
+    return False
 
 
 def now():

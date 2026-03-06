@@ -86,7 +86,7 @@ def _paged_print(text):
         count += 1
         if count >= PAGE_LINES and index < total - 1:
             try:
-                answer = input("--more-- Enter/n/→ next, q/↓ stop: ")
+                answer = input("--more-- q=stop: ")
             except Exception:
                 answer = ""
             cmd = _normalize_nav_cmd(answer)
@@ -607,11 +607,20 @@ def latest(feed=None, per_feed=None):
 
     if not selected:
         print("No feed selected.")
-        return []
+        return 0
+
+    try:
+        import network
+        w = network.WLAN(network.STA_IF)
+        if not w.isconnected():
+            print("No WiFi. Connect first.")
+            return 0
+    except Exception:
+        pass
 
     requests = _http_module()
     if requests is None:
-        return []
+        return 0
 
     collected = []
     for item in selected:
@@ -629,7 +638,7 @@ def latest(feed=None, per_feed=None):
 
     if not collected:
         print("No news.")
-        return []
+        return 0
 
     print("---")
     for index, item in enumerate(collected, start=1):
@@ -645,7 +654,7 @@ def latest(feed=None, per_feed=None):
         print("")
 
     print("Tip: view(1) browse / read(1)")
-    return collected
+    return len(collected)
 
 
 def read(index):
@@ -681,7 +690,7 @@ def read(index):
         print("Link:")
         _paged_print(link)
 
-    return item
+    return None
 
 
 def view(index=1):
