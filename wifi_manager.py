@@ -67,8 +67,28 @@ def load_credentials():
 
 
 def save_credentials(credentials):
-    with open(CREDENTIALS_FILE, "w") as file:
-        json.dump(credentials, file)
+    import os as _os
+    tmp = CREDENTIALS_FILE + ".tmp"
+    try:
+        with open(tmp, "w") as file:
+            json.dump(credentials, file)
+            try:
+                file.flush()
+            except Exception:
+                pass
+    except Exception as e:
+        print("Save err:", e)
+        return False
+    try:
+        _os.remove(CREDENTIALS_FILE)
+    except Exception:
+        pass
+    try:
+        _os.rename(tmp, CREDENTIALS_FILE)
+    except Exception as e:
+        print("Rename err:", e)
+        return False
+    return True
 
 
 def scan_networks(wlan):
@@ -172,7 +192,9 @@ def choose_network(networks):
     if len(networks) > MENU_NETWORK_LIMIT:
         print("Showing top {} of {}".format(MENU_NETWORK_LIMIT, len(networks)))
 
-    while True:
+    MAX_ATTEMPTS = 5
+    attempts = 0
+    while attempts < MAX_ATTEMPTS:
         choice = _safe_input("Net # (Enter=cancel): ").strip()
 
         if choice == "":
@@ -182,12 +204,17 @@ def choose_network(networks):
             selected_index = int(choice)
         except ValueError:
             print("Please enter a valid number.")
+            attempts += 1
             continue
 
         if 1 <= selected_index <= len(visible_networks):
             return visible_networks[selected_index - 1][0]
 
         print("Selection out of range.")
+        attempts += 1
+
+    print("Too many invalid attempts.")
+    return None
 
 
 def connect_saved_networks(wlan, credentials):

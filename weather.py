@@ -148,6 +148,15 @@ def now():
     if requests is None:
         return None
 
+    try:
+        import network
+        w = network.WLAN(network.STA_IF)
+        if not w.isconnected():
+            print("No WiFi. Connect first.")
+            return None
+    except Exception:
+        pass
+
     lat, lon, name = _get_location()
     label = _location_label(name, lat, lon)
     url = "{}?latitude={}&longitude={}&current_weather=true".format(API_URL, lat, lon)
@@ -190,6 +199,9 @@ def now():
     elapsed = time.ticks_diff(time.ticks_ms(), start)
 
     print("---")
+    print("Location:", label)
+    if not name:
+        print("Tip: set_location(lat,lon,'CityName')")
     print(desc)
     print("Temp: {}C".format(temp))
     print("Wind: {} km/h {}deg".format(wind, wdir))
@@ -198,13 +210,22 @@ def now():
     print("ms:", elapsed)
 
     gc.collect()
-    return cw
+    return None
 
 
 def forecast(days=3):
     requests = _http_module()
     if requests is None:
         return None
+
+    try:
+        import network
+        w = network.WLAN(network.STA_IF)
+        if not w.isconnected():
+            print("No WiFi. Connect first.")
+            return None
+    except Exception:
+        pass
 
     try:
         days = max(1, min(7, int(days)))
@@ -255,6 +276,9 @@ def forecast(days=3):
     elapsed = time.ticks_diff(time.ticks_ms(), start)
 
     print("---")
+    print("Location:", label)
+    if not name:
+        print("Tip: set_location(lat,lon,'CityName')")
     for i in range(min(days, len(dates))):
         d = str(dates[i]) if i < len(dates) else "?"
         short_d = d[5:] if len(d) >= 10 else d
@@ -267,7 +291,7 @@ def forecast(days=3):
 
     print("ms:", elapsed)
     gc.collect()
-    return daily
+    return None
 
 
 def ver():

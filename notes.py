@@ -77,7 +77,7 @@ def _paged_print(text):
         count += 1
         if count >= PAGE_LINES and index < total - 1:
             try:
-                answer = input("--more-- Enter/n/\u2192 next, q/\u2193 stop: ")
+                answer = input("--more-- q=stop: ")
             except Exception:
                 answer = ""
             cmd = _normalize_nav_cmd(answer)
@@ -137,10 +137,6 @@ def _save_notes(notes):
         print("Save err:", e)
         return False
     try:
-        os.sync()
-    except Exception:
-        pass
-    try:
         os.remove(DATA_FILE)
     except Exception:
         pass
@@ -186,7 +182,9 @@ def add(text, title=None):
 
     note = {"t": note_title, "b": body, "ts": _ts(), "done": False}
     notes.append(note)
+    gc.collect()
     _save_notes(notes)
+    gc.collect()
     print("Added #{}:".format(len(notes)), _clip(note_title, 26))
     return True
 
@@ -227,14 +225,14 @@ def ls():
     notes = _ensure()
     if not notes:
         print("No notes.")
-        return []
+        return 0
 
     print("Notes ({}):" .format(len(notes)))
     for i, note in enumerate(notes, 1):
         mark = "[x]" if note.get("done") else "[ ]"
         title = _clip(note.get("t", "?"), 22)
         print("{} {} {}".format(i, mark, title))
-    return notes
+    return len(notes)
 
 
 def show(index):
@@ -256,7 +254,7 @@ def show(index):
     _paged_print(note.get("t", ""))
     print("---")
     _paged_print(note.get("b", ""))
-    return note
+    return None
 
 
 def done(index):

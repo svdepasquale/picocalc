@@ -4,6 +4,7 @@ import time
 
 
 MODULE_VERSION = "2026-03-01.2"
+PAGE_LINES = 8
 
 
 def _clip(text, limit):
@@ -82,6 +83,7 @@ def freq():
 def ls(path="/"):
     try:
         items = sorted(os.listdir(path))
+        line_count = 0
         for name in items:
             full = path.rstrip("/") + "/" + name
             try:
@@ -92,6 +94,16 @@ def ls(path="/"):
                     print("  {} {}B".format(name, st[6]))
             except Exception:
                 print("  {}".format(name))
+            line_count += 1
+            if line_count >= PAGE_LINES:
+                try:
+                    answer = input("--more-- q=stop: ").strip().lower()
+                except Exception:
+                    answer = ""
+                if answer == "q":
+                    print("(stopped)")
+                    break
+                line_count = 0
         return items
     except Exception as e:
         print("Err:", e)
@@ -122,6 +134,7 @@ def info():
     ip()
     print("")
     freq()
+    return True
 
 
 def ver():
