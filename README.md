@@ -1,6 +1,6 @@
 # PicoCalc Toolkit (Manual Workflow)
 
-Minimal Wi-Fi + AI + RSS + Clock + Notes + Weather + System toolkit for PicoCalc + Pico 2W, optimized for small display and keyboard.
+Minimal Wi-Fi + AI + RSS + Clock + Notes + Weather + Scientific Calculator + MP3 Player + System toolkit for PicoCalc + Pico 2W, optimized for small display and keyboard.
 
 Screen tuning in this version:
 - SSID preview clipped to 12 chars
@@ -8,6 +8,7 @@ Screen tuning in this version:
 - shorter status/error messages for less line wrapping
 
 ## Files
+- `pico_utils.py` → shared display/navigation/IO utilities (used by other modules)
 - `wifi_manager.py` → connect logic + interactive setup
 - `openrouter_ai.py` → OpenRouter API client + compact chat output
 - `rss_news.py` → RSS reader with preview-first output + manual feed management
@@ -15,6 +16,8 @@ Screen tuning in this version:
 - `clock_ntp.py` → NTP sync, local time, timer, countdown
 - `notes.py` → persistent notes/todo with viewer
 - `weather.py` → current weather + forecast via Open-Meteo (free, no API key)
+- `scientific_calc.py` → scientific calculator with trig, log, conversions, history
+- `mp3_player.py` → audio file player with playlist and browser
 
 Copy all `.py` files to Pico root.
 
@@ -236,6 +239,93 @@ Commands:
 
 Weather output fits PicoCalc 32-char display without wrapping.
 
+## Scientific Calculator
+Pure math module with no network or hardware dependencies. Works offline.
+
+- `import scientific_calc as sc`
+- `sc.sin(1.57)` → sine (radians by default)
+- `sc.cos(0)` / `sc.tan(1)` → cosine / tangent
+- `sc.asin(1)` / `sc.acos(0)` / `sc.atan(1)` → inverse trig
+- `sc.sqrt(16)` → square root
+- `sc.log(10)` → natural log (ln)
+- `sc.log10(100)` / `sc.log2(8)` → base-10 / base-2 log
+- `sc.exp(1)` → e^x
+- `sc.power(2, 10)` → 2^10
+- `sc.factorial(5)` → 5! = 120
+- `sc.abs_val(-5)` / `sc.ceil(1.2)` / `sc.floor(1.8)`
+- `sc.hypot(3, 4)` → hypotenuse = 5
+- `sc.pi()` / `sc.e()` → constants
+
+Angle mode:
+- `sc.deg()` → switch to degrees
+- `sc.rad()` → switch to radians (default)
+- `sc.mode()` → show current mode
+
+Conversions:
+- `sc.d2r(180)` / `sc.r2d(3.14)` → degrees ↔ radians
+- `sc.c2f(0)` / `sc.f2c(32)` → Celsius ↔ Fahrenheit
+- `sc.km2mi(10)` / `sc.mi2km(6)` → km ↔ miles
+
+Variables and history:
+- `sc.store('x', 42)` → save variable
+- `sc.store('y')` → save last result as y
+- `sc.recall('x')` → retrieve variable
+- `sc.variables()` → list all stored variables
+- `sc.clear_vars()` → clear all variables
+- `sc.last()` → show last result
+- `sc.history()` → show calculation history
+- `sc.clear_history()` → clear history
+
+Interactive mode:
+- `sc.calc()` → expression prompt (uses `ans` for last result, stored variables available)
+- Type math expressions directly: `sqrt(2) + pi`
+- Type `q` or empty line to exit
+
+Full command list:
+- `sc.ver()` / `sc.help()` / `sc.h()`
+
+## MP3 Player
+Audio file player for WAV files via I2S or PWM output. Supports playlist management and a file browser.
+
+Hardware setup:
+- I2S DAC (preferred): SCK=GP16, WS=GP17, SD=GP28
+- PWM fallback: audio on GP28
+- Change pin: `mp.set_pin(26)`
+
+Quick start:
+1. Copy `.wav` files to Pico flash (or SD card if available)
+2. `import mp3_player as mp`
+3. `mp.scan()` → find audio files
+4. `mp.load()` → load files into playlist
+5. `mp.play()` → play current track
+
+Commands:
+- `import mp3_player as mp`
+- `mp.scan()` / `mp.ls()` → find audio files on device
+- `mp.scan('/music')` → scan specific directory
+- `mp.load()` / `mp.load('/music')` → load files into playlist
+- `mp.add('/path/to/file.wav')` → add single file to playlist
+- `mp.playlist()` / `mp.pl()` → show playlist
+- `mp.play()` / `mp.p()` → play current track
+- `mp.play(3)` / `mp.p(3)` → play track #3
+- `mp.stop()` / `mp.s()` → stop playback
+- `mp.next_track()` / `mp.n()` → next track
+- `mp.prev_track()` / `mp.pr()` → previous track
+- `mp.now_playing()` / `mp.np()` → show current track + status
+- `mp.browse()` / `mp.b()` → browse playlist (n/p/d/q/arrows)
+- `mp.info()` / `mp.info(2)` → file details
+- `mp.volume(80)` / `mp.v(80)` → set volume (0..100)
+- `mp.volume()` / `mp.v()` → show current volume
+- `mp.clear()` → clear playlist
+- `mp.set_pin(26)` → change audio output pin
+- `mp.ver()` / `mp.help()` / `mp.h()`
+
+Notes:
+- WAV playback is supported natively via I2S or PWM
+- MP3 files require external decoder hardware
+- Ctrl+C to stop playback
+- Audio files should be 16-bit mono WAV at 44100Hz for best results
+
 ## First-time setup
 1. Upload all `.py` files to Pico root.
 2. Open serial monitor.
@@ -274,13 +364,18 @@ import sys_status as s     # s.a() s.ram() s.df() s.ls()
 import clock_ntp as c      # c.n() c.d() c.ts() c.tp()
 import notes as t          # t.l() t.s(1) t.v(1)
 import weather as m        # m.w() m.fc()
+import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
+import mp3_player as mp    # mp.p() mp.s() mp.n() mp.b()
 ```
 
 ## Current version
+- `pico_utils`: `2026-03-22.1`
 - `wifi_manager`: `2026-02-15.17`
-- `openrouter_ai`: `2026-03-01.13`
-- `rss_news`: `2026-03-01.9`
+- `openrouter_ai`: `2026-03-22.1`
+- `rss_news`: `2026-03-22.1`
 - `sys_status`: `2026-03-01.2`
 - `clock_ntp`: `2026-03-01.2`
-- `notes`: `2026-03-01.2`
-- `weather`: `2026-03-01.2`
+- `notes`: `2026-03-22.1`
+- `weather`: `2026-03-22.1`
+- `scientific_calc`: `2026-03-22.1`
+- `mp3_player`: `2026-03-22.1`
