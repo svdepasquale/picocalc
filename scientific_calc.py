@@ -280,7 +280,7 @@ def history():
     if not _HISTORY:
         print("No history.")
         return []
-    print("History ({}):" .format(len(_HISTORY)))
+    print("History ({}):".format(len(_HISTORY)))
     for i, item in enumerate(_HISTORY, 1):
         expr = clip(item["expr"], 18)
         res = clip(str(item["result"]), 10)

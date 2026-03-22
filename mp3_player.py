@@ -66,10 +66,10 @@ def scan(path=None):
 def load(path=None):
     global _PLAYLIST, _CURRENT_INDEX
     if path is not None:
-        _SCAN_PATH_LOCAL = str(path)
+        scan_dir = str(path)
     else:
-        _SCAN_PATH_LOCAL = _SCAN_PATH
-    files = _find_audio_files(_SCAN_PATH_LOCAL)
+        scan_dir = _SCAN_PATH
+    files = _find_audio_files(scan_dir)
     if not files:
         print("No audio files found.")
         return False
