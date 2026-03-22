@@ -32,7 +32,20 @@ jobs:
                 continue;
               }
 
-              const { data: pulls } = await github.rest.pulls.list({
+              const { data: openPulls } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${branch.name}`,
+                state: 'open',
+                per_page: 1,
+              });
+
+              if (openPulls.length > 0) {
+                console.log(`Skipping branch with open pull request: ${branch.name}`);
+                continue;
+              }
+
+              const { data: closedPulls } = await github.rest.pulls.list({
                 owner,
                 repo,
                 head: `${owner}:${branch.name}`,
@@ -40,7 +53,7 @@ jobs:
                 per_page: 1,
               });
 
-              if (pulls.length > 0) {
+              if (closedPulls.length > 0 && closedPulls[0].merged_at) {
                 console.log(`Deleting branch: ${branch.name}`);
                 try {
                   await github.rest.git.deleteRef({
