@@ -1,0 +1,69 @@
+name: Delete merged branches
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  delete-merged-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged feature branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const protectedBranches = ['main'];
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const branches = await github.paginate(github.rest.repos.listBranches, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+
+            for (const branch of branches) {
+              if (protectedBranches.includes(branch.name)) {
+                continue;
+              }
+
+              const { data: openPulls } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${branch.name}`,
+                state: 'open',
+                per_page: 1,
+              });
+
+              if (openPulls.length > 0) {
+                console.log(`Skipping branch with open pull request: ${branch.name}`);
+                continue;
+              }
+
+              const { data: closedPulls } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${branch.name}`,
+                state: 'closed',
+                per_page: 1,
+              });
+
+              if (closedPulls.length > 0 && closedPulls[0].merged_at) {
+                console.log(`Deleting branch: ${branch.name}`);
+                try {
+                  await github.rest.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${branch.name}`,
+                  });
+                  console.log(`  Deleted: ${branch.name}`);
+                } catch (error) {
+                  console.log(`  Failed to delete ${branch.name}: ${error.message}`);
+                }
+              }
+            }
