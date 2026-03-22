@@ -1,11 +1,6 @@
-import gc
-import os
 import time
 
-try:
-    import ujson as json
-except ImportError:
-    import json
+from pico_utils import load_json, save_json
 
 
 CONFIG_FILE = "clock_config.json"
@@ -18,43 +13,14 @@ _timer_start = None
 
 
 def _load_config():
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
+    data = load_json(CONFIG_FILE)
+    if isinstance(data, dict):
+        return data
     return {}
 
 
 def _save_config(config):
-    tmp = CONFIG_FILE + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(config, f)
-            try:
-                f.flush()
-            except Exception:
-                pass
-    except Exception as e:
-        print("Save err:", e)
-        return False
-    try:
-        os.sync()
-    except Exception:
-        pass
-    try:
-        os.remove(CONFIG_FILE)
-    except Exception:
-        pass
-    try:
-        os.rename(tmp, CONFIG_FILE)
-    except Exception as e:
-        print("Rename err:", e)
-        return False
-    gc.collect()
-    return True
+    return save_json(CONFIG_FILE, config)
 
 
 def _get_offset():

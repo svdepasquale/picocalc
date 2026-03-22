@@ -402,7 +402,7 @@ def browse():
             pos = (pos - 1) % total
             continue
         if cmd == "d":
-            play(pos + 1)
+            info(pos + 1)
             continue
         try:
             jump = int(cmd) - 1
