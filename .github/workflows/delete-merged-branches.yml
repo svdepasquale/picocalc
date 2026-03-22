@@ -29,6 +29,18 @@ jobs:
               repo,
               per_page: 100,
             });
+            const defaultBranchInfo = branches.find((branch) => branch.name === defaultBranch);
+
+            if (!defaultBranchInfo) {
+              core.setFailed(`Could not find default branch: ${defaultBranch}`);
+              return;
+            }
+
+            const { data: defaultCommit } = await github.rest.git.getCommit({
+              owner,
+              repo,
+              commit_sha: defaultBranchInfo.commit.sha,
+            });
 
             for (const branch of branches) {
               if (protectedBranches.includes(branch.name)) {
@@ -61,13 +73,13 @@ jobs:
                 deleteReason = 'merged pull request';
               } else if (closedPulls.length > 0) {
                 try {
-                  const { data: comparison } = await github.rest.repos.compareCommits({
+                  const { data: branchCommit } = await github.rest.git.getCommit({
                     owner,
                     repo,
-                    basehead: `${defaultBranch}...${branch.name}`,
+                    commit_sha: branch.commit.sha,
                   });
 
-                  if ((comparison.files || []).length === 0) {
+                  if (branchCommit.tree.sha === defaultCommit.tree.sha) {
                     deleteReason = `closed pull request with no remaining file changes vs ${defaultBranch}`;
                   } else {
                     console.log(`Keeping closed branch with remaining changes: ${branch.name}`);
