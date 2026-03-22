@@ -1,6 +1,10 @@
 import gc
-import os
 import time
+
+from pico_utils import clip as _clip
+from pico_utils import paged_print as _paged_print
+from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
+from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 
 try:
     import ujson as json
@@ -9,15 +13,13 @@ except ImportError:
 
 
 CONFIG_FILE = "rss_feeds.json"
-DISPLAY_WIDTH = 32
-PAGE_LINES = 8
 MAX_XML_CHARS = 26000
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-03-01.9"
+MODULE_VERSION = "2026-03-22.1"
 
 DEFAULT_FEEDS = [
     {"name": "CNN", "url": "https://rss.cnn.com/rss/edition.rss"},
@@ -28,153 +30,15 @@ DEFAULT_FEEDS = [
 _LAST_ITEMS = []
 
 
-def _clip(text, limit):
-    value = str(text)
-    if len(value) <= limit:
-        return value
-    return value[:limit]
-
-
-def _wrap_text(text, width=DISPLAY_WIDTH):
-    source = str(text).replace("\r\n", "\n").replace("\r", "\n")
-    wrapped = []
-    for paragraph in source.split("\n"):
-        paragraph = paragraph.strip()
-        if paragraph == "":
-            wrapped.append("")
-            continue
-
-        line = ""
-        for word in paragraph.split(" "):
-            if word == "":
-                continue
-            if line == "":
-                if len(word) <= width:
-                    line = word
-                else:
-                    start = 0
-                    while start < len(word):
-                        wrapped.append(word[start : start + width])
-                        start += width
-            elif len(line) + 1 + len(word) <= width:
-                line += " " + word
-            else:
-                wrapped.append(line)
-                if len(word) <= width:
-                    line = word
-                else:
-                    start = 0
-                    while start < len(word):
-                        wrapped.append(word[start : start + width])
-                        start += width
-                    line = ""
-        if line:
-            wrapped.append(line)
-    return wrapped
-
-
-def _paged_print(text):
-    lines = _wrap_text(text)
-    if not lines:
-        print("(empty)")
-        return
-
-    count = 0
-    total = len(lines)
-    for index, line in enumerate(lines):
-        print(line)
-        count += 1
-        if count >= PAGE_LINES and index < total - 1:
-            try:
-                answer = input("--more-- q=stop: ")
-            except Exception:
-                answer = ""
-            cmd = _normalize_nav_cmd(answer)
-            if cmd == "q":
-                print("(stopped)")
-                break
-            count = 0
-
-
-def _normalize_nav_cmd(raw):
-    cmd = str(raw).strip().lower()
-    if cmd == "":
-        return ""
-
-    if cmd in ("\x1b[c", "\x1boc", "right"):
-        return "n"
-    if cmd in ("\x1b[d", "\x1bod", "left"):
-        return "p"
-    if cmd in ("\x1b[a", "\x1boa", "up"):
-        return "d"
-    if cmd in ("\x1b[b", "\x1bob", "down"):
-        return "q"
-
-    if cmd.endswith("[c"):
-        return "n"
-    if cmd.endswith("[d"):
-        return "p"
-    if cmd.endswith("[a"):
-        return "d"
-    if cmd.endswith("[b"):
-        return "q"
-
-    return cmd
-
-
 def _load_config():
-    try:
-        with open(CONFIG_FILE, "r") as file:
-            data = json.load(file)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
+    data = load_json(CONFIG_FILE)
+    if isinstance(data, dict):
+        return data
     return {}
 
 
 def _save_config(config):
-    tmp_file = CONFIG_FILE + ".tmp"
-    try:
-        with open(tmp_file, "w") as file:
-            json.dump(config, file)
-            try:
-                file.flush()
-            except Exception:
-                pass
-    except Exception as error:
-        print("Save err:", error)
-        return False
-
-    try:
-        os.sync()
-    except Exception:
-        pass
-
-    try:
-        os.remove(CONFIG_FILE)
-    except Exception:
-        pass
-
-    try:
-        os.rename(tmp_file, CONFIG_FILE)
-    except Exception as error:
-        print("Rename err:", error)
-        return False
-
-    gc.collect()
-    return True
-
-
-def _http_module():
-    try:
-        import urequests as requests
-
-        return requests
-    except ImportError:
-        print("Missing urequests.")
-        print("Install: import mip; mip.install('urequests')")
-        return None
+    return save_json(CONFIG_FILE, config)
 
 
 def _decode_entities(text):
@@ -609,14 +473,8 @@ def latest(feed=None, per_feed=None):
         print("No feed selected.")
         return 0
 
-    try:
-        import network
-        w = network.WLAN(network.STA_IF)
-        if not w.isconnected():
-            print("No WiFi. Connect first.")
-            return 0
-    except Exception:
-        pass
+    if not check_wifi():
+        return 0
 
     requests = _http_module()
     if requests is None:

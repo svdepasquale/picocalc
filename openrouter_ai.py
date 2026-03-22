@@ -1,6 +1,10 @@
 import gc
-import os
 import time
+
+from pico_utils import clip as _clip
+from pico_utils import paged_print as _paged_print
+from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
+from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 
 try:
     import ujson as json
@@ -13,10 +17,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char display. Prefer plain text."
 DISPLAY_WIDTH = 32
-PAGE_LINES = 8
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-03-01.13"
+MODULE_VERSION = "2026-03-22.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -31,45 +34,18 @@ PRESET_PROMPTS = {
 
 
 def _load_config():
-    try:
-        with open(CONFIG_FILE, "r") as file:
-            data = json.load(file)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
+    data = load_json(CONFIG_FILE)
+    if isinstance(data, dict):
+        return data
     return {}
 
 
 def _save_config(config):
     print("Saving config...")
-    tmp_file = CONFIG_FILE + ".tmp"
-    try:
-        with open(tmp_file, "w") as file:
-            json.dump(config, file)
-            try:
-                file.flush()
-            except Exception:
-                pass
-    except Exception as error:
-        print("Save err:", error)
-        return False
-    try:
-        os.sync()
-    except Exception:
-        pass
-    try:
-        os.remove(CONFIG_FILE)
-    except Exception:
-        pass
-    try:
-        os.rename(tmp_file, CONFIG_FILE)
-    except Exception as error:
-        print("Rename err:", error)
-        return False
-    gc.collect()
-    print("Saved.")
-    return True
+    result = save_json(CONFIG_FILE, config)
+    if result:
+        print("Saved.")
+    return result
 
 
 def _set_config_value(key, value, empty_message, saved_message, show_value=False):
@@ -85,111 +61,6 @@ def _set_config_value(key, value, empty_message, saved_message, show_value=False
     else:
         print(saved_message)
     return True
-
-
-def _clip(text, limit):
-    value = str(text)
-    if len(value) <= limit:
-        return value
-    return value[:limit]
-
-
-def _wrap_text(text, width=DISPLAY_WIDTH):
-    source = str(text).replace("\r\n", "\n").replace("\r", "\n")
-    wrapped = []
-    for paragraph in source.split("\n"):
-        paragraph = paragraph.strip()
-        if paragraph == "":
-            wrapped.append("")
-            continue
-
-        line = ""
-        for word in paragraph.split(" "):
-            if word == "":
-                continue
-            if line == "":
-                if len(word) <= width:
-                    line = word
-                else:
-                    start = 0
-                    while start < len(word):
-                        wrapped.append(word[start : start + width])
-                        start += width
-            elif len(line) + 1 + len(word) <= width:
-                line += " " + word
-            else:
-                wrapped.append(line)
-                if len(word) <= width:
-                    line = word
-                else:
-                    start = 0
-                    while start < len(word):
-                        wrapped.append(word[start : start + width])
-                        start += width
-                    line = ""
-        if line:
-            wrapped.append(line)
-    return wrapped
-
-
-def _paged_print(text):
-    lines = _wrap_text(text)
-    if not lines:
-        print("(empty)")
-        return
-
-    count = 0
-    total = len(lines)
-    for index, line in enumerate(lines):
-        print(line)
-        count += 1
-        if count >= PAGE_LINES and index < total - 1:
-            try:
-                answer = input("--more-- q=stop: ")
-            except Exception:
-                answer = ""
-            cmd = _normalize_nav_cmd(answer)
-            if cmd == "q":
-                print("(stopped)")
-                break
-            count = 0
-
-
-def _normalize_nav_cmd(raw):
-    cmd = str(raw).strip().lower()
-    if cmd == "":
-        return ""
-
-    if cmd in ("\x1b[c", "\x1boc", "right"):
-        return "n"
-    if cmd in ("\x1b[d", "\x1bod", "left"):
-        return "p"
-    if cmd in ("\x1b[a", "\x1boa", "up"):
-        return "d"
-    if cmd in ("\x1b[b", "\x1bob", "down"):
-        return "q"
-
-    if cmd.endswith("[c"):
-        return "n"
-    if cmd.endswith("[d"):
-        return "p"
-    if cmd.endswith("[a"):
-        return "d"
-    if cmd.endswith("[b"):
-        return "q"
-
-    return cmd
-
-
-def _http_module():
-    try:
-        import urequests as requests
-
-        return requests
-    except ImportError:
-        print("Missing urequests.")
-        print("Install: import mip; mip.install('urequests')")
-        return None
 
 
 def set_api_key(api_key):
@@ -418,14 +289,8 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
     if requests is None:
         return None
 
-    try:
-        import network
-        w = network.WLAN(network.STA_IF)
-        if not w.isconnected():
-            print("No WiFi. Connect first.")
-            return None
-    except Exception:
-        pass
+    if not check_wifi():
+        return None
 
     config = _load_config()
     api_key = config.get("api_key", "")

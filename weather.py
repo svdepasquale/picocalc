@@ -1,15 +1,12 @@
 import gc
-import os
 import time
 
-try:
-    import ujson as json
-except ImportError:
-    import json
+from pico_utils import clip as _clip
+from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-03-01.2"
+MODULE_VERSION = "2026-03-22.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 DEFAULT_LAT = 41.9
 DEFAULT_LON = 12.5
@@ -39,62 +36,15 @@ WMO_CODES = {
 }
 
 
-def _clip(text, limit):
-    value = str(text)
-    if len(value) <= limit:
-        return value
-    return value[:limit]
-
-
 def _load_config():
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
+    data = load_json(CONFIG_FILE)
+    if isinstance(data, dict):
+        return data
     return {}
 
 
 def _save_config(config):
-    tmp = CONFIG_FILE + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(config, f)
-            try:
-                f.flush()
-            except Exception:
-                pass
-    except Exception as e:
-        print("Save err:", e)
-        return False
-    try:
-        os.sync()
-    except Exception:
-        pass
-    try:
-        os.remove(CONFIG_FILE)
-    except Exception:
-        pass
-    try:
-        os.rename(tmp, CONFIG_FILE)
-    except Exception as e:
-        print("Rename err:", e)
-        return False
-    gc.collect()
-    return True
-
-
-def _http_module():
-    try:
-        import urequests as requests
-
-        return requests
-    except ImportError:
-        print("Missing urequests.")
-        print("Install: import mip; mip.install('urequests')")
-        return None
+    return save_json(CONFIG_FILE, config)
 
 
 def _get_location():
@@ -148,14 +98,8 @@ def now():
     if requests is None:
         return None
 
-    try:
-        import network
-        w = network.WLAN(network.STA_IF)
-        if not w.isconnected():
-            print("No WiFi. Connect first.")
-            return None
-    except Exception:
-        pass
+    if not check_wifi():
+        return None
 
     lat, lon, name = _get_location()
     label = _location_label(name, lat, lon)
@@ -218,14 +162,8 @@ def forecast(days=3):
     if requests is None:
         return None
 
-    try:
-        import network
-        w = network.WLAN(network.STA_IF)
-        if not w.isconnected():
-            print("No WiFi. Connect first.")
-            return None
-    except Exception:
-        pass
+    if not check_wifi():
+        return None
 
     try:
         days = max(1, min(7, int(days)))
