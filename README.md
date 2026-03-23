@@ -321,10 +321,12 @@ Commands:
 - `mp.ver()` / `mp.help()` / `mp.h()`
 
 Notes:
-- WAV playback is supported natively via I2S or PWM
+- WAV playback supported natively via I2S (I2S DAC required)
+- Only standard PCM WAV files supported (exotic formats with extra chunks may need conversion)
 - MP3 files require external decoder hardware
+- Volume control: software scaling on 16-bit WAV output
 - Ctrl+C to stop playback
-- Audio files should be 16-bit mono WAV at 44100Hz for best results
+- Recommended format: 16-bit mono WAV at 44100Hz
 
 ## First-time setup
 1. Upload all `.py` files to Pico root.
@@ -354,6 +356,14 @@ Run in REPL:
 - If NTP sync fails: check Wi-Fi connection, retry `c.sync()`.
 - If ntptime missing: run `import mip; mip.install('ntptime')`.
 - If weather shows wrong location: run `m.set_location(lat, lon, 'name')`.
+
+## Known limitations
+- **Uptime**: `s.uptime()` resets after ~12-25 days (MicroPython `ticks_ms` overflow). Mitigated with `ticks_diff` but still wraps on very long runs.
+- **WAV format**: Only standard PCM WAV files are fully supported. Files with extra metadata chunks (LIST, INFO) are now handled, but exotic formats may still fail.
+- **Password echo**: Wi-Fi password is visible when typing (MicroPython `input()` has no hidden mode).
+- **MP3 playback**: Requires external decoder hardware. Software MP3 decoding is not supported.
+- **Volume**: Software-scaled on 16-bit WAV. Very low volumes may reduce audio quality.
+- **RAM**: Large RSS feeds or long AI responses may cause memory pressure. Use `s.gc_run()` to free RAM.
 
 ## Quick reference (all aliases)
 ```

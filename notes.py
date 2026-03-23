@@ -61,7 +61,10 @@ def add(text, title=None):
     note = {"t": note_title, "b": body, "ts": _ts(), "done": False}
     notes.append(note)
     gc.collect()
-    _save_notes(notes)
+    if not _save_notes(notes):
+        notes.pop()
+        print("Save failed.")
+        return False
     gc.collect()
     print("Added #{}:".format(len(notes)), _clip(note_title, 26))
     return True
@@ -146,7 +149,10 @@ def done(index):
         print("Out of range.")
         return False
     notes[pos]["done"] = True
-    _save_notes(notes)
+    if not _save_notes(notes):
+        notes[pos]["done"] = False
+        print("Save failed.")
+        return False
     print("Done:", _clip(notes[pos].get("t", "?"), 26))
     return True
 
@@ -162,7 +168,10 @@ def undone(index):
         print("Out of range.")
         return False
     notes[pos]["done"] = False
-    _save_notes(notes)
+    if not _save_notes(notes):
+        notes[pos]["done"] = True
+        print("Save failed.")
+        return False
     print("Undone:", _clip(notes[pos].get("t", "?"), 26))
     return True
 
@@ -178,22 +187,23 @@ def rm(index):
         print("Out of range.")
         return False
     removed = notes.pop(pos)
-    _save_notes(notes)
+    if not _save_notes(notes):
+        notes.insert(pos, removed)
+        print("Save failed.")
+        return False
     print("Removed:", _clip(removed.get("t", "?"), 26))
     return True
 
 
 def clear_done():
     notes = _ensure()
-    removed = 0
-    i = len(notes) - 1
-    while i >= 0:
-        if notes[i].get("done"):
-            notes.pop(i)
-            removed += 1
-        i -= 1
+    remaining = [n for n in notes if not n.get("done")]
+    removed = len(notes) - len(remaining)
     if removed > 0:
-        _save_notes(notes)
+        if not _save_notes(remaining):
+            print("Save failed.")
+            return 0
+        notes[:] = remaining
     print("Cleared:", removed, "done notes")
     return removed
 
@@ -212,9 +222,15 @@ def edit(index, text):
     if body == "":
         print("Empty text.")
         return False
+    old_body = notes[pos]["b"]
+    old_ts = notes[pos].get("ts", "")
     notes[pos]["b"] = body
     notes[pos]["ts"] = _ts()
-    _save_notes(notes)
+    if not _save_notes(notes):
+        notes[pos]["b"] = old_body
+        notes[pos]["ts"] = old_ts
+        print("Save failed.")
+        return False
     print("Updated #{}".format(pos + 1))
     return True
 

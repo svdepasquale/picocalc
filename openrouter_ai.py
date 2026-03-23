@@ -340,22 +340,21 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         body = response.json()
     except Exception as error:
         print("Request fail:", error)
+        return None
+    finally:
         if response is not None:
             try:
                 response.close()
             except Exception:
                 pass
-        return None
-
-    try:
-        response.close()
-    except Exception:
-        pass
 
     if status != 200:
         print("HTTP:", status)
         if isinstance(body, dict) and "error" in body:
-            print("Err:", _clip(body["error"], 80))
+            err = body["error"]
+            if isinstance(err, dict):
+                err = err.get("message", str(err))
+            print("Err:", _clip(err, 80))
         else:
             print("Bad response")
         return None
@@ -379,9 +378,8 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         _history_append("user", prompt_text)
         _history_append("assistant", text)
 
-    if raw:
-        return text
-    return None
+    gc.collect()
+    return text
 
 
 def chat(with_view=False):

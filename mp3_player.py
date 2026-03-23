@@ -22,8 +22,10 @@ _I2S = None
 _SCAN_PATH = "/"
 
 
-def _find_audio_files(path="/", recursive=True):
+def _find_audio_files(path="/", recursive=True, _depth=0):
     files = []
+    if _depth > 8:
+        return files
     try:
         items = os.listdir(path)
     except Exception:
@@ -35,7 +37,7 @@ def _find_audio_files(path="/", recursive=True):
             st = os.stat(full)
             if st[0] & 0x4000:
                 if recursive:
-                    files.extend(_find_audio_files(full, recursive))
+                    files.extend(_find_audio_files(full, recursive, _depth + 1))
             else:
                 for ext in SUPPORTED_EXT:
                     if lower_name.endswith(ext):
@@ -148,15 +150,8 @@ def _init_audio():
         )
         return _I2S
     except ImportError:
-        pass
-    try:
-        from machine import Pin, PWM
-
-        pwm = PWM(Pin(_AUDIO_PIN))
-        pwm.freq(44100)
-        pwm.duty_u16(0)
-        _I2S = pwm
-        return _I2S
+        print("No I2S module.")
+        return None
     except Exception as e:
         print("Audio init err:", clip(str(e), 20))
         return None
@@ -172,20 +167,60 @@ def _deinit_audio():
         _I2S = None
 
 
+def _scale_volume(buf, n):
+    scale = _VOLUME / 100.0
+    for i in range(0, n - 1, 2):
+        sample = buf[i] | (buf[i + 1] << 8)
+        if sample >= 0x8000:
+            sample -= 0x10000
+        sample = int(sample * scale)
+        if sample > 32767:
+            sample = 32767
+        elif sample < -32768:
+            sample = -32768
+        if sample < 0:
+            sample += 0x10000
+        buf[i] = sample & 0xFF
+        buf[i + 1] = (sample >> 8) & 0xFF
+
+
 def _parse_wav_header(f):
-    header = f.read(44)
-    if header is None or len(header) < 44:
+    riff = f.read(12)
+    if riff is None or len(riff) < 12:
         return None
-    if header[0:4] != b"RIFF" or header[8:12] != b"WAVE":
+    if riff[0:4] != b"RIFF" or riff[8:12] != b"WAVE":
         return None
-    channels = header[22] | (header[23] << 8)
-    sample_rate = (
-        header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24)
-    )
-    bits = header[34] | (header[35] << 8)
-    data_size = (
-        header[40] | (header[41] << 8) | (header[42] << 16) | (header[43] << 24)
-    )
+    channels = 0
+    sample_rate = 0
+    bits = 0
+    data_size = 0
+    for _ in range(20):
+        chunk_hdr = f.read(8)
+        if chunk_hdr is None or len(chunk_hdr) < 8:
+            break
+        cid = chunk_hdr[0:4]
+        csz = (
+            chunk_hdr[4] | (chunk_hdr[5] << 8)
+            | (chunk_hdr[6] << 16) | (chunk_hdr[7] << 24)
+        )
+        if cid == b"fmt ":
+            fmt = f.read(csz)
+            if fmt is None or len(fmt) < 16:
+                return None
+            channels = fmt[2] | (fmt[3] << 8)
+            sample_rate = (
+                fmt[4] | (fmt[5] << 8) | (fmt[6] << 16) | (fmt[7] << 24)
+            )
+            bits = fmt[14] | (fmt[15] << 8)
+        elif cid == b"data":
+            data_size = csz
+            break
+        else:
+            f.read(csz)
+            if csz % 2:
+                f.read(1)
+    if sample_rate == 0:
+        return None
     return {
         "channels": channels,
         "rate": sample_rate,
@@ -220,6 +255,8 @@ def _play_wav(filepath):
             n = f.readinto(buf)
             if n is None or n == 0:
                 break
+            if _VOLUME < 100 and info["bits"] == 16:
+                _scale_volume(buf, n)
             try:
                 audio.write(buf[:n])
             except Exception:

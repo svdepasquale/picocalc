@@ -319,8 +319,12 @@ def calc():
 
         try:
             namespace = {
-                "sin": math.sin, "cos": math.cos, "tan": math.tan,
-                "asin": math.asin, "acos": math.acos, "atan": math.atan,
+                "sin": lambda x: math.sin(_to_rad(x)),
+                "cos": lambda x: math.cos(_to_rad(x)),
+                "tan": lambda x: math.tan(_to_rad(x)),
+                "asin": lambda x: _from_rad(math.asin(x)),
+                "acos": lambda x: _from_rad(math.acos(x)),
+                "atan": lambda x: _from_rad(math.atan(x)),
                 "sqrt": math.sqrt, "log": math.log, "log10": math.log10,
                 "exp": math.exp, "pow": math.pow, "abs": abs,
                 "pi": math.pi, "e": math.e,

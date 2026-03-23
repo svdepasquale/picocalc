@@ -168,12 +168,12 @@ def countdown(secs):
     try:
         remaining = total
         while remaining > 0:
-            m = remaining // 60
-            s = remaining % 60
-            print("  {}m {:02d}s".format(m, s))
-            step = min(remaining, 10)
-            time.sleep(step)
-            remaining -= step
+            if remaining == total or remaining % 10 == 0 or remaining <= 5:
+                m = remaining // 60
+                s = remaining % 60
+                print("  {}m {:02d}s".format(m, s))
+            time.sleep(1)
+            remaining -= 1
     except KeyboardInterrupt:
         print("Cancelled.")
         return False

@@ -6,11 +6,6 @@ from pico_utils import paged_print as _paged_print
 from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 
-try:
-    import ujson as json
-except ImportError:
-    import json
-
 
 CONFIG_FILE = "rss_feeds.json"
 MAX_XML_CHARS = 26000
@@ -145,6 +140,7 @@ def _find_blocks(xml_lower, xml_orig, tag_name, max_items):
 
 def _parse_feed(xml_text, max_items):
     items = []
+    gc.collect()
     xml_lower = xml_text.lower()
     item_blocks = _find_blocks(xml_lower, xml_text, "item", max_items)
     mode = "rss"

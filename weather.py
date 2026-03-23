@@ -166,9 +166,9 @@ def forecast(days=3):
         return None
 
     try:
-        days = max(1, min(7, int(days)))
+        num_days = max(1, min(7, int(days)))
     except Exception:
-        days = 3
+        num_days = 3
 
     lat, lon, name = _get_location()
     label = _location_label(name, lat, lon)
@@ -176,9 +176,9 @@ def forecast(days=3):
         "{}?latitude={}&longitude={}"
         "&daily=temperature_2m_max,temperature_2m_min,weathercode"
         "&timezone=auto&forecast_days={}"
-    ).format(API_URL, lat, lon, days)
+    ).format(API_URL, lat, lon, num_days)
 
-    print("Forecast>", label, "({}d)".format(days))
+    print("Forecast>", label, "({}d)".format(num_days))
     response = None
     start = time.ticks_ms()
 
@@ -217,7 +217,7 @@ def forecast(days=3):
     print("Location:", label)
     if not name:
         print("Tip: set_location(lat,lon,'CityName')")
-    for i in range(min(days, len(dates))):
+    for i in range(min(num_days, len(dates))):
         d = str(dates[i]) if i < len(dates) else "?"
         short_d = d[5:] if len(d) >= 10 else d
         hi = tmax[i] if i < len(tmax) else "?"

@@ -5,6 +5,7 @@ import time
 
 MODULE_VERSION = "2026-03-01.2"
 PAGE_LINES = 8
+_BOOT_TICKS = time.ticks_ms()
 
 
 def _clip(text, limit):
@@ -42,7 +43,7 @@ def flash():
 
 
 def uptime():
-    ms = time.ticks_ms()
+    ms = time.ticks_diff(time.ticks_ms(), _BOOT_TICKS)
     s = ms // 1000
     m = s // 60
     h = m // 60

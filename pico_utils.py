@@ -119,6 +119,7 @@ def load_json(filepath):
 
 def save_json(filepath, data):
     tmp = filepath + ".tmp"
+    bak = filepath + ".bak"
     try:
         with open(tmp, "w") as f:
             json.dump(data, f)
@@ -134,14 +135,26 @@ def save_json(filepath, data):
     except Exception:
         pass
     try:
-        os.remove(filepath)
+        os.remove(bak)
+    except Exception:
+        pass
+    try:
+        os.rename(filepath, bak)
     except Exception:
         pass
     try:
         os.rename(tmp, filepath)
     except Exception as e:
         print("Rename err:", e)
+        try:
+            os.rename(bak, filepath)
+        except Exception:
+            pass
         return False
+    try:
+        os.remove(bak)
+    except Exception:
+        pass
     gc.collect()
     return True
 
@@ -167,13 +180,17 @@ def http_module():
 def check_wifi():
     try:
         import network
-
+    except ImportError:
+        print("No network module.")
+        return False
+    try:
         w = network.WLAN(network.STA_IF)
         if not w.isconnected():
             print("No WiFi. Connect first.")
             return False
     except Exception:
-        pass
+        print("WiFi check error.")
+        return False
     return True
 
 
