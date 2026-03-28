@@ -29,32 +29,37 @@ def wrap_text(text, width=DISPLAY_WIDTH):
             wrapped.append("")
             continue
 
-        line = ""
+        parts = []
+        parts_len = 0
         for word in paragraph.split(" "):
             if word == "":
                 continue
-            if line == "":
+            if not parts:
                 if len(word) <= width:
-                    line = word
+                    parts.append(word)
+                    parts_len = len(word)
                 else:
                     start = 0
                     while start < len(word):
                         wrapped.append(word[start : start + width])
                         start += width
-            elif len(line) + 1 + len(word) <= width:
-                line += " " + word
+            elif parts_len + 1 + len(word) <= width:
+                parts.append(word)
+                parts_len += 1 + len(word)
             else:
-                wrapped.append(line)
+                wrapped.append(" ".join(parts))
+                parts = []
+                parts_len = 0
                 if len(word) <= width:
-                    line = word
+                    parts.append(word)
+                    parts_len = len(word)
                 else:
                     start = 0
                     while start < len(word):
                         wrapped.append(word[start : start + width])
                         start += width
-                    line = ""
-        if line:
-            wrapped.append(line)
+        if parts:
+            wrapped.append(" ".join(parts))
     return wrapped
 
 
@@ -323,15 +328,29 @@ def safe_input(prompt):
         return ""
 
 
+_HTTP_TIMEOUT_SET = False
+
+
 def http_module():
+    global _HTTP_TIMEOUT_SET
     try:
         import urequests as requests
-
-        return requests
     except ImportError:
         print("Missing urequests.")
         print("Install: import mip; mip.install('urequests')")
         return None
+    if not _HTTP_TIMEOUT_SET:
+        try:
+            import usocket
+            usocket.setdefaulttimeout(10)
+        except Exception:
+            try:
+                import socket
+                socket.setdefaulttimeout(10)
+            except Exception:
+                pass
+        _HTTP_TIMEOUT_SET = True
+    return requests
 
 
 def check_wifi():

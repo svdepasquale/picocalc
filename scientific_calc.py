@@ -7,6 +7,7 @@ from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen,
 MODULE_VERSION = "2026-03-28.2"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
+MAX_EXPR_LEN = 160
 DEG_MODE = False
 
 _HISTORY = []
@@ -372,10 +373,17 @@ def calc():
             help()
             continue
 
+        if len(expr) > MAX_EXPR_LEN:
+            print("Too long (max {}).".format(MAX_EXPR_LEN))
+            continue
+
         try:
             namespace = _calc_namespace()
             result = eval(expr, {"__builtins__": {}}, namespace)
             _print_result(expr, result)
+        except MemoryError:
+            print("Too complex.")
+            gc.collect()
         except Exception as err:
             print("Err:", clip(str(err), 26))
 

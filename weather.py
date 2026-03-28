@@ -12,6 +12,7 @@ API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
 DEFAULT_LON = 12.5
+_GEO_CACHE = {}
 
 WMO_CODES = {
     0: "Clear",
@@ -86,11 +87,31 @@ def set_location(lat, lon, name=""):
     return True
 
 
+def _url_encode(text):
+    safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    out = []
+    for ch in str(text):
+        if ch in safe:
+            out.append(ch)
+        elif ch == " ":
+            out.append("+")
+        else:
+            for b in ch.encode("utf-8"):
+                out.append("%{:02X}".format(b))
+    return "".join(out)
+
+
 def set_city(name):
     city = str(name).strip()
     if city == "":
         print("Empty city name.")
         return False
+
+    cache_key = city.lower()
+    if cache_key in _GEO_CACHE:
+        cached = _GEO_CACHE[cache_key]
+        print("Cached:", _clip(cached["name"], 24))
+        return set_location(cached["lat"], cached["lon"], cached["name"])
 
     requests = _http_module()
     if requests is None:
@@ -100,7 +121,7 @@ def set_city(name):
         return False
 
     url = "{}?name={}&count=1&language=en&format=json".format(
-        GEOCODING_URL, city.replace(" ", "+")
+        GEOCODING_URL, _url_encode(city)
     )
 
     print("Looking up:", _clip(city, 24))
@@ -141,7 +162,9 @@ def set_city(name):
     del data
     gc.collect()
 
-    return set_location(lat, lon, _clip(label, 28))
+    clipped_label = _clip(label, 28)
+    _GEO_CACHE[cache_key] = {"lat": lat, "lon": lon, "name": clipped_label}
+    return set_location(lat, lon, clipped_label)
 
 
 def show_location():
@@ -213,8 +236,9 @@ def now():
         print("At:", _clip(wtime, 20))
     print("ms:", elapsed)
 
+    result = {"temp": temp, "wind": wind, "wind_dir": wdir, "desc": desc, "time": wtime}
     gc.collect()
-    return None
+    return result
 
 
 def forecast(days=3):
@@ -277,6 +301,7 @@ def forecast(days=3):
     print("Location:", label)
     if not name:
         print("Tip: set_location(lat,lon,'CityName')")
+    forecast_data = []
     for i in range(min(num_days, len(dates))):
         d = str(dates[i]) if i < len(dates) else "?"
         short_d = d[5:] if len(d) >= 10 else d
@@ -286,10 +311,11 @@ def forecast(days=3):
         desc = WMO_CODES.get(c, "?")
         print("{} {}".format(short_d, desc))
         print("  {}..{}C".format(lo, hi))
+        forecast_data.append({"date": d, "min": lo, "max": hi, "desc": desc})
 
     print("ms:", elapsed)
     gc.collect()
-    return None
+    return forecast_data
 
 
 def ver():

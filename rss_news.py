@@ -95,6 +95,28 @@ def _decode_entities(text):
     value = value.replace("&quot;", '"')
     value = value.replace("&apos;", "'")
     value = value.replace("&nbsp;", " ")
+    if "&#" in value:
+        out = []
+        i = 0
+        while i < len(value):
+            if value[i:i + 2] == "&#" and i + 2 < len(value):
+                sc = value.find(";", i + 2)
+                if sc > 0 and sc - i < 10:
+                    ref = value[i + 2:sc]
+                    try:
+                        if ref and ref[0] in ("x", "X"):
+                            cp = int(ref[1:], 16)
+                        else:
+                            cp = int(ref)
+                        if 0 < cp < 0x10000:
+                            out.append(chr(cp))
+                            i = sc + 1
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+            out.append(value[i])
+            i += 1
+        value = "".join(out)
     return value
 
 
