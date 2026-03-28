@@ -3,6 +3,8 @@
 Minimal Wi-Fi + AI + RSS + Clock + Notes + Weather + Scientific Calculator + MP3 Player + System toolkit for PicoCalc + Pico 2W, optimized for small display and keyboard.
 
 Screen tuning in this version:
+- shared viewer layout across AI, RSS, Notes, MP3
+- paged lists for feeds, responses, notes, playlists
 - SSID preview clipped to 12 chars
 - network menu shows top 6 entries
 - shorter status/error messages for less line wrapping
@@ -33,8 +35,8 @@ Data files created automatically:
 - Manual-first workflow (recommended for PicoCalc session behavior).
 - Connect Wi-Fi from REPL, then run AI/RSS commands.
 
-## Viewer navigation (AI + RSS)
-Both `ai.view()` and `n.view()` use the same controls:
+## Viewer navigation (AI + RSS + Notes + MP3)
+`ai.view()`, `n.view()`, `t.view()` and `mp.browse()` use the same controls:
 - `n` / `→` → next (wraps around)
 - `p` / `←` → prev (wraps around)
 - `d` / `↑` → full detail
@@ -165,6 +167,7 @@ RSS command list:
 ## System status
 - `import sys_status as s`
 - `s.info()` / `s.a()` → full system overview (RAM, flash, uptime, IP, CPU)
+- sizes are shown in compact B/KB/MB form
 - `s.ram()` → free/used RAM after gc.collect
 - `s.flash()` / `s.df()` → flash storage usage
 - `s.uptime()` → time since boot
@@ -225,6 +228,7 @@ Persistent notes stored in `notes_data.json` on flash. Max 50 notes.
 Uses Open-Meteo API (free, no API key required). Requires Wi-Fi.
 
 Default location: Rome (41.9, 12.5). Change with:
+- `m.set_city('Paris')` / `m.sc('Paris')` → geocode city name
 - `m.set_location(48.85, 2.35, 'Paris')`
 - `m.set_location(40.71, -74.01, 'New York')`
 - Saved to `weather_config.json`
@@ -234,6 +238,8 @@ Commands:
 - `m.now()` / `m.w()` → current temperature, wind, conditions
 - `m.forecast()` / `m.fc()` → 3-day forecast (min/max temp + conditions)
 - `m.forecast(7)` / `m.fc(7)` → up to 7 days
+- `m.set_city('Rome')` / `m.sc('Rome')` → lookup city and save coords
+- `m.set_location(lat, lon, 'name')` → save precise coords
 - `m.show_location()` → show current lat/lon/name
 - `m.ver()` / `m.help()` / `m.h()`
 
@@ -285,12 +291,11 @@ Full command list:
 - `sc.ver()` / `sc.help()` / `sc.h()`
 
 ## MP3 Player
-Audio file player for WAV files via I2S or PWM output. Supports playlist management and a file browser.
+Audio file player for WAV files via I2S output. Supports playlist management and a file browser.
 
 Hardware setup:
-- I2S DAC (preferred): SCK=GP16, WS=GP17, SD=GP28
-- PWM fallback: audio on GP28
-- Change pin: `mp.set_pin(26)`
+- I2S DAC required: SCK=GP16, WS=GP17, SD=GP28
+- Change SD pin: `mp.set_pin(26)`
 
 Quick start:
 1. Copy `.wav` files to Pico flash (or SD card if available)
@@ -321,7 +326,7 @@ Commands:
 - `mp.ver()` / `mp.help()` / `mp.h()`
 
 Notes:
-- WAV playback supported natively via I2S (I2S DAC required)
+- WAV playback supported via I2S only (I2S DAC required)
 - Only standard PCM WAV files supported (exotic formats with extra chunks may need conversion)
 - MP3 files require external decoder hardware
 - Volume control: software scaling on 16-bit WAV output
@@ -355,7 +360,7 @@ Run in REPL:
 - If feed fails repeatedly: remove and re-add URL (`n.rm_feed(...)`, `n.add_feed(...)`).
 - If NTP sync fails: check Wi-Fi connection, retry `c.sync()`.
 - If ntptime missing: run `import mip; mip.install('ntptime')`.
-- If weather shows wrong location: run `m.set_location(lat, lon, 'name')`.
+- If weather shows wrong location: run `m.set_city('Rome')` or `m.set_location(lat, lon, 'name')`.
 
 ## Known limitations
 - **Uptime**: `s.uptime()` resets after ~12-25 days (MicroPython `ticks_ms` overflow). Mitigated with `ticks_diff` but still wraps on very long runs.
@@ -373,19 +378,19 @@ import rss_news as n       # n.l() n.r(1) n.v(1) n.f()
 import sys_status as s     # s.a() s.ram() s.df() s.ls()
 import clock_ntp as c      # c.n() c.d() c.ts() c.tp()
 import notes as t          # t.l() t.s(1) t.v(1)
-import weather as m        # m.w() m.fc()
+import weather as m        # m.w() m.fc() m.sc('Rome')
 import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
 import mp3_player as mp    # mp.p() mp.s() mp.n() mp.b()
 ```
 
 ## Current version
-- `pico_utils`: `2026-03-22.1`
-- `wifi_manager`: `2026-02-15.17`
-- `openrouter_ai`: `2026-03-22.1`
-- `rss_news`: `2026-03-22.1`
-- `sys_status`: `2026-03-01.2`
-- `clock_ntp`: `2026-03-01.2`
-- `notes`: `2026-03-22.1`
-- `weather`: `2026-03-22.1`
-- `scientific_calc`: `2026-03-22.1`
-- `mp3_player`: `2026-03-22.1`
+- `pico_utils`: `2026-03-28.2`
+- `wifi_manager`: `2026-03-28.2`
+- `openrouter_ai`: `2026-03-28.2`
+- `rss_news`: `2026-03-28.2`
+- `sys_status`: `2026-03-28.2`
+- `clock_ntp`: `2026-03-28.2`
+- `notes`: `2026-03-28.2`
+- `weather`: `2026-03-28.2`
+- `scientific_calc`: `2026-03-28.2`
+- `mp3_player`: `2026-03-28.2`

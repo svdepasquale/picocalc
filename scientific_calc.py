@@ -1,10 +1,10 @@
 import gc
 import math
 
-from pico_utils import clip, paged_print, safe_input, clear_screen, screen_header
+from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen, screen_header
 
 
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
 DEG_MODE = False
@@ -41,6 +41,64 @@ def _from_rad(x):
     if DEG_MODE:
         return x * 180.0 / math.pi
     return x
+
+
+def _calc_log(x, base=None):
+    if base is None:
+        return math.log(x)
+    return math.log(x) / math.log(base)
+
+
+def _calc_factorial(n):
+    try:
+        val = int(n)
+    except Exception as error:
+        raise ValueError("Integer required.") from error
+    if val < 0:
+        raise ValueError("Non-negative required.")
+    if val > 170:
+        raise ValueError("Too large (max 170).")
+    result = 1
+    for i in range(2, val + 1):
+        result *= i
+    return result
+
+
+def _calc_namespace():
+    namespace = {
+        "sin": lambda x: math.sin(_to_rad(x)),
+        "cos": lambda x: math.cos(_to_rad(x)),
+        "tan": lambda x: math.tan(_to_rad(x)),
+        "asin": lambda x: _from_rad(math.asin(x)),
+        "acos": lambda x: _from_rad(math.acos(x)),
+        "atan": lambda x: _from_rad(math.atan(x)),
+        "sqrt": math.sqrt,
+        "log": _calc_log,
+        "log10": math.log10,
+        "log2": lambda x: _calc_log(x, 2),
+        "exp": math.exp,
+        "pow": math.pow,
+        "power": math.pow,
+        "abs": abs,
+        "abs_val": abs,
+        "pi": math.pi,
+        "e": math.e,
+        "ceil": math.ceil,
+        "floor": math.floor,
+        "factorial": _calc_factorial,
+        "hypot": lambda x, y: math.sqrt(x * x + y * y),
+        "d2r": lambda degrees: degrees * math.pi / 180.0,
+        "r2d": lambda radians: radians * 180.0 / math.pi,
+        "c2f": lambda celsius: celsius * 9.0 / 5.0 + 32,
+        "f2c": lambda fahrenheit: (fahrenheit - 32) * 5.0 / 9.0,
+        "km2mi": lambda km: km * 0.621371,
+        "mi2km": lambda mi: mi / 0.621371,
+    }
+    for key, value in _VARS.items():
+        namespace[key] = value
+    if _LAST is not None:
+        namespace["ans"] = _LAST
+    return namespace
 
 
 def deg():
@@ -106,11 +164,10 @@ def sqrt(x):
 
 
 def log(x, base=None):
+    result = _calc_log(x, base)
     if base is not None:
-        result = math.log(x) / math.log(base)
         _print_result("log({},{})".format(x, base), result)
     else:
-        result = math.log(x)
         _print_result("ln({})".format(x), result)
     return result
 
@@ -122,7 +179,7 @@ def log10(x):
 
 
 def log2(x):
-    result = math.log(x) / math.log(2)
+    result = _calc_log(x, 2)
     _print_result("log2({})".format(x), result)
     return result
 
@@ -141,20 +198,11 @@ def power(base, exponent):
 
 def factorial(n):
     try:
-        val = int(n)
-    except Exception:
-        print("Integer required.")
+        result = _calc_factorial(n)
+    except ValueError as error:
+        print(error)
         return None
-    if val < 0:
-        print("Non-negative required.")
-        return None
-    if val > 170:
-        print("Too large (max 170).")
-        return None
-    result = 1
-    for i in range(2, val + 1):
-        result *= i
-    _print_result("{}!".format(val), result)
+    _print_result("{}!".format(int(n)), result)
     return result
 
 
@@ -257,8 +305,10 @@ def variables():
     if not _VARS:
         print("No stored variables.")
         return {}
+    lines = []
     for k, v in _VARS.items():
-        print("{}={}".format(k, v))
+        lines.append("{}={}".format(k, v))
+    paged_lines(lines)
     return _VARS
 
 
@@ -281,10 +331,12 @@ def history():
         print("No history.")
         return []
     print("History ({}):".format(len(_HISTORY)))
+    lines = []
     for i, item in enumerate(_HISTORY, 1):
         expr = clip(item["expr"], 18)
         res = clip(str(item["result"]), 10)
-        print("{}: {} = {}".format(i, expr, res))
+        lines.append("{}: {} = {}".format(i, expr, res))
+    paged_lines(lines)
     return _HISTORY
 
 
@@ -321,22 +373,7 @@ def calc():
             continue
 
         try:
-            namespace = {
-                "sin": lambda x: math.sin(_to_rad(x)),
-                "cos": lambda x: math.cos(_to_rad(x)),
-                "tan": lambda x: math.tan(_to_rad(x)),
-                "asin": lambda x: _from_rad(math.asin(x)),
-                "acos": lambda x: _from_rad(math.acos(x)),
-                "atan": lambda x: _from_rad(math.atan(x)),
-                "sqrt": math.sqrt, "log": math.log, "log10": math.log10,
-                "exp": math.exp, "pow": math.pow, "abs": abs,
-                "pi": math.pi, "e": math.e,
-                "ceil": math.ceil, "floor": math.floor,
-            }
-            for k, v in _VARS.items():
-                namespace[k] = v
-            if _LAST is not None:
-                namespace["ans"] = _LAST
+            namespace = _calc_namespace()
             result = eval(expr, {"__builtins__": {}}, namespace)
             _print_result(expr, result)
         except Exception as err:

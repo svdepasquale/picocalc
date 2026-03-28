@@ -1,5 +1,6 @@
 import gc
 import os
+import time
 
 try:
     import ujson as json
@@ -9,7 +10,7 @@ except ImportError:
 
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 
 
 def clip(text, limit):
@@ -90,6 +91,149 @@ def paged_print(text, page_lines=PAGE_LINES):
                 print("(stopped)")
                 break
             count = 0
+
+
+def preview_lines(text, width=DISPLAY_WIDTH, max_lines=PAGE_LINES):
+    lines = wrap_text(text, width)
+    if max_lines is None or max_lines < 1 or len(lines) <= max_lines:
+        return lines
+
+    shown = lines[:max_lines]
+    if shown:
+        tail = shown[-1]
+        max_tail = width - 3
+        if max_tail < 0:
+            max_tail = 0
+        if len(tail) > max_tail:
+            tail = tail[:max_tail]
+        shown[-1] = tail + "..."
+    return shown
+
+
+def preview_print(text, width=DISPLAY_WIDTH, max_lines=PAGE_LINES):
+    lines = preview_lines(text, width=width, max_lines=max_lines)
+    if not lines:
+        print("(empty)")
+        return 0
+    for line in lines:
+        print(line)
+    return len(lines)
+
+
+def paged_lines(lines, page_lines=PAGE_LINES):
+    if not lines:
+        print("(empty)")
+        return 0
+
+    count = 0
+    total = len(lines)
+    for index, line in enumerate(lines):
+        print(line)
+        count += 1
+        if count >= page_lines and index < total - 1:
+            cmd = normalize_nav_cmd(safe_input("Enter=next q=stop: "))
+            if cmd == "q":
+                print("(stopped)")
+                break
+            count = 0
+    return total
+
+
+def format_bytes(size):
+    try:
+        value = int(size)
+    except Exception:
+        return "?"
+
+    if value < 1024:
+        return "{}B".format(value)
+    if value < 1024 * 1024:
+        return "{}KB".format(value // 1024)
+    return "{}MB".format(value // (1024 * 1024))
+
+
+def ticks_ms():
+    if hasattr(time, "ticks_ms"):
+        return time.ticks_ms()
+    return int(time.time() * 1000)
+
+
+def ticks_diff(current, start):
+    if hasattr(time, "ticks_diff"):
+        return time.ticks_diff(current, start)
+    return int(current) - int(start)
+
+
+def sleep_ms(ms):
+    if hasattr(time, "sleep_ms"):
+        time.sleep_ms(ms)
+        return
+    time.sleep(ms / 1000.0)
+
+
+def browse_items(
+    title,
+    items,
+    start_index=1,
+    render_summary=None,
+    render_detail=None,
+    nav_prompt="n/p/d/q/#/arrows: ",
+):
+    if not items:
+        print("No items.")
+        return None
+
+    try:
+        pos = int(start_index) - 1
+    except Exception:
+        print("Invalid index.")
+        return None
+
+    total = len(items)
+    if pos < 0 or pos >= total:
+        print("Out of range.")
+        return None
+
+    while True:
+        screen_header(title)
+        item = items[pos]
+
+        if render_summary is not None:
+            render_summary(item, pos, total)
+
+        print("=" * DISPLAY_WIDTH)
+        print("n/p move  d detail")
+        print("q quit   # jump")
+
+        cmd = normalize_nav_cmd(safe_input(nav_prompt))
+        if cmd == "":
+            continue
+        if cmd == "q":
+            clear_screen()
+            return item
+        if cmd == "n":
+            pos = (pos + 1) % total
+            continue
+        if cmd == "p":
+            pos = (pos - 1) % total
+            continue
+        if cmd == "d":
+            if render_detail is not None:
+                clear_screen()
+                render_detail(item, pos, total)
+                safe_input("Enter=back: ")
+            continue
+
+        try:
+            jump = int(cmd) - 1
+            if 0 <= jump < total:
+                pos = jump
+            else:
+                print("Out of range.")
+                safe_input("Enter=back: ")
+        except Exception:
+            print("Use n/p/d/q/# or arrows")
+            safe_input("Enter=back: ")
 
 
 def normalize_nav_cmd(raw):

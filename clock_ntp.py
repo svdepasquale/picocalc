@@ -1,10 +1,10 @@
 import time
 
-from pico_utils import load_json, save_json
+from pico_utils import load_json, save_json, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "clock_config.json"
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 NTP_HOST = "pool.ntp.org"
 DEFAULT_UTC_OFFSET = 0
 MAX_NTP_RETRIES = 2
@@ -124,7 +124,7 @@ def epoch():
 
 def timer_start():
     global _timer_start
-    _timer_start = time.ticks_ms()
+    _timer_start = _ticks_ms()
     print("Timer started.")
     return True
 
@@ -134,7 +134,7 @@ def timer_stop():
     if _timer_start is None:
         print("No timer running.")
         return None
-    elapsed = time.ticks_diff(time.ticks_ms(), _timer_start)
+    elapsed = _ticks_diff(_ticks_ms(), _timer_start)
     _timer_start = None
     s = elapsed // 1000
     ms = elapsed % 1000
@@ -147,7 +147,7 @@ def timer_check():
     if _timer_start is None:
         print("No timer running.")
         return None
-    elapsed = time.ticks_diff(time.ticks_ms(), _timer_start)
+    elapsed = _ticks_diff(_ticks_ms(), _timer_start)
     s = elapsed // 1000
     ms = elapsed % 1000
     m = s // 60

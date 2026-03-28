@@ -1,5 +1,8 @@
 import time
 
+from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
+from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+
 try:
     import ujson as json
 except ImportError:
@@ -16,7 +19,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-03-28.1"
+WIFI_MANAGER_VERSION = "2026-03-28.2"
 _NETWORK_MODULE = None
 
 
@@ -139,9 +142,9 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
     wlan.connect(ssid, password)
 
     timeout_ms = int(timeout * 1000)
-    start = time.ticks_ms()
+    start = _ticks_ms()
 
-    while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
+    while _ticks_diff(_ticks_ms(), start) < timeout_ms:
         status = wlan.status()
 
         if status == network.STAT_GOT_IP:
@@ -150,7 +153,7 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
         if status in (network.STAT_WRONG_PASSWORD, network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL):
             return False
 
-        time.sleep_ms(CONNECT_POLL_INTERVAL_MS)
+        _sleep_ms(CONNECT_POLL_INTERVAL_MS)
 
     return wlan.isconnected()
 
@@ -203,10 +206,14 @@ def choose_network(networks):
         print("No WiFi networks.")
         return None
 
-    print("\nWiFi networks:")
+    _screen_header("WiFi Setup")
+    print("Choose network")
+    print("---")
     visible_networks = networks[:MENU_NETWORK_LIMIT]
+    lines = []
     for index, (ssid, rssi) in enumerate(visible_networks, start=1):
-        print("{}: {} {}dBm".format(index, _clip_ssid(ssid), rssi))
+        lines.append("{}: {} {}dBm".format(index, _clip_ssid(ssid), rssi))
+    _paged_lines(lines, page_lines=MENU_NETWORK_LIMIT)
 
     if len(networks) > MENU_NETWORK_LIMIT:
         print("Showing top {} of {}".format(MENU_NETWORK_LIMIT, len(networks)))
@@ -253,7 +260,7 @@ def connect_saved_networks(wlan, credentials):
 
         if attempt < SCAN_RETRY_COUNT - 1:
             print("Scan retry")
-            time.sleep_ms(SCAN_RETRY_DELAY_MS)
+            _sleep_ms(SCAN_RETRY_DELAY_MS)
 
     if scanned_ssids:
         candidates = [ssid for ssid in scanned_ssids if ssid in credentials]
@@ -281,7 +288,7 @@ def connect_saved_networks(wlan, credentials):
 
 def auto_connect_or_prompt(interactive=True):
     wlan = _sta_wlan(active=True)
-    time.sleep_ms(WLAN_WARMUP_MS)
+    _sleep_ms(WLAN_WARMUP_MS)
 
     if wlan.isconnected():
         print("Already up. IP:", wlan.ifconfig()[0])

@@ -3,9 +3,12 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
-from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
+from pico_utils import paged_lines as _paged_lines
+from pico_utils import preview_print as _preview_print
+from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
-from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
+from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import screen_header as _screen_header
 
 try:
     import ujson as json
@@ -20,7 +23,7 @@ DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char displ
 DISPLAY_WIDTH = 32
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -32,6 +35,39 @@ PRESET_PROMPTS = {
     "teacher": "Explain step by step in simple language. Keep each line short.",
     "code": "Focus on practical code help. Use short snippets and concise notes.",
 }
+
+
+def _resolve_response(index):
+    try:
+        pos = int(index) - 1
+    except Exception:
+        print("Invalid index.")
+        return None, None
+    if pos < 0 or pos >= len(_LAST_RESPONSES):
+        print("Out of range.")
+        return None, None
+    return _LAST_RESPONSES[pos], pos
+
+
+def _render_response_summary(item, pos, total):
+    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24)))
+    print("ms:", item.get("elapsed_ms", 0))
+    print("Q:")
+    _preview_print(_clip(item.get("prompt", ""), MAX_PROMPT_CHARS), max_lines=3)
+    print("---")
+    print("A:")
+    _preview_print(_clip(item.get("answer", ""), VIEW_PREVIEW_CHARS), max_lines=4)
+
+
+def _render_response_detail(item, pos, total):
+    _screen_header("AI Detail")
+    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24)))
+    print("ms:", item.get("elapsed_ms", 0))
+    print("Q:")
+    _paged_print(item.get("prompt", ""))
+    print("---")
+    print("A:")
+    _paged_print(item.get("answer", ""))
 
 
 def _load_config():
@@ -46,6 +82,8 @@ def _save_config(config):
     result = save_json(CONFIG_FILE, config)
     if result:
         print("Saved.")
+    else:
+        print("Save failed.")
     return result
 
 
@@ -56,7 +94,8 @@ def _set_config_value(key, value, empty_message, saved_message, show_value=False
         return False
     config = _load_config()
     config[key] = text
-    _save_config(config)
+    if not _save_config(config):
+        return False
     if show_value:
         print(saved_message, text)
     else:
@@ -74,7 +113,8 @@ def set_api_key(api_key):
     config["api_key"] = value
     if "model" not in config:
         config["model"] = DEFAULT_MODEL
-    _save_config(config)
+    if not _save_config(config):
+        return False
     print("API key saved.")
     return True
 
@@ -91,7 +131,8 @@ def clear_system_prompt():
     config = _load_config()
     if "system_prompt" in config:
         del config["system_prompt"]
-        _save_config(config)
+        if not _save_config(config):
+            return False
     print("System prompt cleared.")
     return True
 
@@ -214,11 +255,13 @@ def responses():
 
     print("Responses:")
     total = len(_LAST_RESPONSES)
+    lines = []
     for index, item in enumerate(_LAST_RESPONSES, start=1):
-        print("{}: {} ({}ms)".format(index, _clip(item.get("model", "?"), 24), item.get("elapsed_ms", 0)))
-        print("   Q:", _clip(item.get("prompt", ""), 44))
-        print("   A:", _clip(item.get("answer", ""), 44))
-    print("Cached:", total, "/", MAX_VIEW_RESPONSES)
+        lines.append("{}: {} ({}ms)".format(index, _clip(item.get("model", "?"), 24), item.get("elapsed_ms", 0)))
+        lines.append("   Q: {}".format(_clip(item.get("prompt", ""), 44)))
+        lines.append("   A: {}".format(_clip(item.get("answer", ""), 44)))
+    lines.append("Cached: {} / {}".format(total, MAX_VIEW_RESPONSES))
+    _paged_lines(lines)
     return _LAST_RESPONSES
 
 
@@ -233,58 +276,13 @@ def view(index=1):
     if not _LAST_RESPONSES:
         print("No cached responses. Run ask()/chat().")
         return None
-
-    try:
-        pos = int(index) - 1
-    except Exception:
-        print("Invalid index.")
-        return None
-
-    total = len(_LAST_RESPONSES)
-    if pos < 0 or pos >= total:
-        print("Out of range.")
-        return None
-
-    _screen_header("AI Responses")
-    while True:
-        item = _LAST_RESPONSES[pos]
-        print("---")
-        print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24)))
-        print("ms:", item.get("elapsed_ms", 0))
-        print("Q:")
-        _paged_print(_clip(item.get("prompt", ""), MAX_PROMPT_CHARS))
-        print("A preview:")
-        _paged_print(_clip(item.get("answer", ""), VIEW_PREVIEW_CHARS))
-
-        try:
-            cmd = _normalize_nav_cmd(input("n/p/d/q/#/arrows: "))
-        except Exception:
-            cmd = "q"
-
-        if cmd == "q":
-            _clear_screen()
-            return item
-        if cmd == "n":
-            if total > 0:
-                pos = (pos + 1) % total
-            continue
-        if cmd == "p":
-            if total > 0:
-                pos = (pos - 1) % total
-            continue
-        if cmd == "d":
-            print("Answer:")
-            _paged_print(item.get("answer", ""))
-            continue
-
-        try:
-            jump = int(cmd) - 1
-            if 0 <= jump < total:
-                pos = jump
-            else:
-                print("Out of range.")
-        except Exception:
-            print("Use n/p/d/q/# or arrows")
+    return _browse_items(
+        "AI Responses",
+        _LAST_RESPONSES,
+        index,
+        _render_response_summary,
+        _render_response_detail,
+    )
 
 
 def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, raw=False):
@@ -334,7 +332,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
     }
 
     print("AI>", selected_model)
-    start_ms = time.ticks_ms()
+    start_ms = _ticks_ms()
 
     response = None
     try:
@@ -369,7 +367,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         return None
 
     text = _clip(text, MAX_OUTPUT_CHARS)
-    elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
+    elapsed_ms = _ticks_diff(_ticks_ms(), start_ms)
     print("---")
     _paged_print(text)
     print("---")

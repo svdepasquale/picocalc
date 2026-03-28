@@ -2,10 +2,12 @@ import gc
 import os
 import time
 
+from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
 
-MODULE_VERSION = "2026-03-28.1"
+
+MODULE_VERSION = "2026-03-28.2"
 PAGE_LINES = 8
-_BOOT_TICKS = time.ticks_ms()
+_BOOT_TICKS = ticks_ms()
 
 
 def ram():
@@ -14,8 +16,9 @@ def ram():
     alloc = gc.mem_alloc()
     total = free + alloc
     pct = (alloc * 100) // total if total > 0 else 0
-    print("RAM free:", free)
-    print("RAM used:", alloc, "({}%)".format(pct))
+    print("RAM free:", format_bytes(free))
+    print("RAM used:", format_bytes(alloc), "({}%)".format(pct))
+    print("RAM tot:", format_bytes(total))
     return {"free": free, "used": alloc, "total": total}
 
 
@@ -27,8 +30,9 @@ def flash():
         free = bs * s[3]
         used = total - free
         pct = (used * 100) // total if total > 0 else 0
-        print("Flash free:", free)
-        print("Flash used:", used, "({}%)".format(pct))
+        print("Flash free:", format_bytes(free))
+        print("Flash used:", format_bytes(used), "({}%)".format(pct))
+        print("Flash tot:", format_bytes(total))
         return {"free": free, "used": used, "total": total}
     except Exception as e:
         print("Flash err:", e)
@@ -36,7 +40,7 @@ def flash():
 
 
 def uptime():
-    ms = time.ticks_diff(time.ticks_ms(), _BOOT_TICKS)
+    ms = ticks_diff(ticks_ms(), _BOOT_TICKS)
     s = ms // 1000
     m = s // 60
     h = m // 60
@@ -77,27 +81,19 @@ def freq():
 def ls(path="/"):
     try:
         items = sorted(os.listdir(path))
-        line_count = 0
+        lines = []
         for name in items:
             full = path.rstrip("/") + "/" + name
             try:
                 st = os.stat(full)
                 if st[0] & 0x4000:
-                    print("  {}/".format(name))
+                    lines.append("  {}/".format(name))
                 else:
-                    print("  {} {}B".format(name, st[6]))
+                    lines.append("  {} {}".format(name, format_bytes(st[6])))
             except Exception:
-                print("  {}".format(name))
-            line_count += 1
-            if line_count >= PAGE_LINES:
-                try:
-                    answer = input("Enter=next q=stop: ").strip().lower()
-                except Exception:
-                    answer = ""
-                if answer == "q":
-                    print("(stopped)")
-                    break
-                line_count = 0
+                lines.append("  {}".format(name))
+        print("Dir:", path)
+        paged_lines(lines, page_lines=PAGE_LINES)
         return len(items)
     except Exception as e:
         print("Err:", e)
@@ -112,21 +108,21 @@ def gc_run():
     before = gc.mem_free()
     gc.collect()
     after = gc.mem_free()
-    print("Freed:", after - before)
-    print("Free now:", after)
+    print("Freed:", format_bytes(after - before))
+    print("Free now:", format_bytes(after))
     return after
 
 
 def info():
-    print("=== System ===")
+    screen_header("System Status")
     ram()
-    print("")
+    print("---")
     flash()
-    print("")
+    print("---")
     uptime()
-    print("")
+    print("---")
     ip()
-    print("")
+    print("---")
     freq()
     return True
 

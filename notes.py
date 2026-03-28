@@ -3,16 +3,18 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
-from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
+from pico_utils import paged_lines as _paged_lines
+from pico_utils import preview_print as _preview_print
+from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json
-from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
+from pico_utils import screen_header as _screen_header
 
 
 DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 
 _NOTES = None
 
@@ -103,6 +105,43 @@ def add_prompt():
     return add(body, title=title if title else None)
 
 
+def _resolve_note(index):
+    notes = _ensure()
+    try:
+        pos = int(index) - 1
+    except Exception:
+        print("Invalid index.")
+        return notes, None
+    if pos < 0 or pos >= len(notes):
+        print("Out of range.")
+        return notes, None
+    return notes, pos
+
+
+def _render_note_summary(note, pos, total):
+    state = "DONE" if note.get("done") else "OPEN"
+    print("[{}/{}] {}".format(pos + 1, total, state))
+    if note.get("ts"):
+        print(note["ts"])
+    print("Title:")
+    _preview_print(_clip(note.get("t", "?"), MAX_TITLE_CHARS), max_lines=2)
+    print("---")
+    _preview_print(_clip(note.get("b", ""), 180), max_lines=4)
+
+
+def _render_note_detail(note, pos, total):
+    _screen_header("Note Detail")
+    mark = " [DONE]" if note.get("done") else ""
+    print("#{}/{}{}".format(pos + 1, total, mark))
+    if note.get("ts"):
+        print("Date:", note["ts"])
+    print("Title:")
+    _paged_print(note.get("t", ""))
+    print("---")
+    print("Body:")
+    _paged_print(note.get("b", ""))
+
+
 def ls():
     notes = _ensure()
     if not notes:
@@ -110,32 +149,21 @@ def ls():
         return 0
 
     print("Notes ({}):" .format(len(notes)))
+    lines = []
     for i, note in enumerate(notes, 1):
         mark = "[x]" if note.get("done") else "[ ]"
         title = _clip(note.get("t", "?"), 22)
-        print("{} {} {}".format(i, mark, title))
+        lines.append("{} {} {}".format(i, mark, title))
+    _paged_lines(lines)
     return len(notes)
 
 
 def show(index):
-    notes = _ensure()
-    try:
-        pos = int(index) - 1
-    except Exception:
-        print("Invalid index.")
+    notes, pos = _resolve_note(index)
+    if pos is None:
         return None
-    if pos < 0 or pos >= len(notes):
-        print("Out of range.")
-        return None
-
     note = notes[pos]
-    mark = " [DONE]" if note.get("done") else ""
-    print("#{}{}".format(pos + 1, mark))
-    if note.get("ts"):
-        print("Date:", note["ts"])
-    _paged_print(note.get("t", ""))
-    print("---")
-    _paged_print(note.get("b", ""))
+    _render_note_detail(note, pos, len(notes))
     return None
 
 
@@ -249,57 +277,7 @@ def view(index=1):
     if not notes:
         print("No notes.")
         return None
-
-    try:
-        pos = int(index) - 1
-    except Exception:
-        print("Invalid index.")
-        return None
-
-    total = len(notes)
-    if pos < 0 or pos >= total:
-        print("Out of range.")
-        return None
-
-    _screen_header("Notes")
-    while True:
-        note = notes[pos]
-        mark = " [DONE]" if note.get("done") else ""
-        print("---")
-        print("[{}/{}]{}".format(pos + 1, total, mark))
-        if note.get("ts"):
-            print(note["ts"])
-        _paged_print(_clip(note.get("t", "?"), MAX_TITLE_CHARS))
-        print("---")
-        preview = _clip(note.get("b", ""), 100)
-        _paged_print(preview)
-
-        try:
-            cmd = _normalize_nav_cmd(input("n/p/d/q/#/arrows: "))
-        except Exception:
-            cmd = "q"
-
-        if cmd == "q":
-            _clear_screen()
-            return note
-        if cmd == "n":
-            pos = (pos + 1) % total
-            continue
-        if cmd == "p":
-            pos = (pos - 1) % total
-            continue
-        if cmd == "d":
-            show(pos + 1)
-            continue
-
-        try:
-            jump = int(cmd) - 1
-            if 0 <= jump < total:
-                pos = jump
-            else:
-                print("Out of range.")
-        except Exception:
-            print("Use n/p/d/q/# or arrows")
+    return _browse_items("Notes", notes, index, _render_note_summary, _render_note_detail)
 
 
 def ver():

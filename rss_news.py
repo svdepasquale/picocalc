@@ -3,9 +3,12 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
-from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
+from pico_utils import paged_lines as _paged_lines
+from pico_utils import preview_print as _preview_print
+from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
-from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
+from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import screen_header as _screen_header
 
 
 CONFIG_FILE = "rss_feeds.json"
@@ -15,7 +18,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 
 DEFAULT_FEEDS = [
     {"name": "CNN", "url": "https://rss.cnn.com/rss/edition.rss"},
@@ -24,6 +27,51 @@ DEFAULT_FEEDS = [
 ]
 
 _LAST_ITEMS = []
+
+
+def _resolve_cached_item(index):
+    try:
+        pos = int(index) - 1
+    except Exception:
+        print("Invalid index.")
+        return None, None
+    if pos < 0 or pos >= len(_LAST_ITEMS):
+        print("Out of range.")
+        return None, None
+    return _LAST_ITEMS[pos], pos
+
+
+def _render_news_summary(item, pos, total, preview_chars=DEFAULT_PREVIEW_CHARS):
+    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18)))
+    if item.get("date"):
+        _preview_print(_clip(item.get("date"), 80), max_lines=1)
+    print("Title:")
+    _preview_print(_clip(item.get("title", "(no title)"), MAX_TITLE_CHARS), max_lines=3)
+    print("---")
+    preview = _clip(item.get("summary", ""), preview_chars)
+    if preview:
+        _preview_print(preview, max_lines=4)
+    else:
+        print("(no preview)")
+
+
+def _render_news_detail(item, pos, total):
+    _screen_header("RSS Detail")
+    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18)))
+    if item.get("date"):
+        print("Date:", item.get("date"))
+    print("Title:")
+    _paged_print(item.get("title", ""))
+
+    summary = item.get("summary", "")
+    if summary:
+        print("Summary:")
+        _paged_print(summary)
+
+    link = item.get("link", "")
+    if link:
+        print("Link:")
+        _paged_print(link)
 
 
 def _load_config():
@@ -293,12 +341,14 @@ def feeds():
         return []
 
     print("Feeds:")
+    lines = []
     for index, item in enumerate(feed_list, start=1):
         name = _clean_text(item.get("name", "?"), 28)
         url = _clean_text(item.get("url", ""), 120)
-        print("{}: {}".format(index, name))
-        print("   {}".format(_clip(url, 58)))
+        lines.append("{}: {}".format(index, name))
+        lines.append("   {}".format(_clip(url, 58)))
 
+    _paged_lines(lines)
     return feed_list
 
 
@@ -398,7 +448,7 @@ def set_items_per_feed(count):
 def _fetch_feed(name, url, per_feed, requests):
     print("RSS>", _clip(name, 24))
     response = None
-    start = time.ticks_ms()
+    start = _ticks_ms()
 
     try:
         response = requests.get(url)
@@ -424,7 +474,7 @@ def _fetch_feed(name, url, per_feed, requests):
     if len(xml_text) > MAX_XML_CHARS:
         xml_text = xml_text[:MAX_XML_CHARS]
     parsed = _parse_feed(xml_text, per_feed)
-    elapsed = time.ticks_diff(time.ticks_ms(), start)
+    elapsed = _ticks_diff(_ticks_ms(), start)
     print("ok", len(parsed), "ms", elapsed)
 
     for item in parsed:
@@ -517,34 +567,11 @@ def read(index):
         print("No cached news. Run latest().")
         return None
 
-    try:
-        pos = int(index) - 1
-    except Exception:
-        print("Invalid index.")
+    item, pos = _resolve_cached_item(index)
+    if item is None:
         return None
 
-    if pos < 0 or pos >= len(_LAST_ITEMS):
-        print("Out of range.")
-        return None
-
-    item = _LAST_ITEMS[pos]
-
-    print("Source:", item.get("source", "?"))
-    if item.get("date"):
-        print("Date:", item.get("date"))
-    print("Title:")
-    _paged_print(item.get("title", ""))
-
-    summary = item.get("summary", "")
-    if summary:
-        print("Summary:")
-        _paged_print(summary)
-
-    link = item.get("link", "")
-    if link:
-        print("Link:")
-        _paged_print(link)
-
+    _render_news_detail(item, pos, len(_LAST_ITEMS))
     return None
 
 
@@ -553,65 +580,15 @@ def view(index=1):
         print("No cached news. Run latest().")
         return None
 
-    try:
-        pos = int(index) - 1
-    except Exception:
-        print("Invalid index.")
-        return None
-
-    total = len(_LAST_ITEMS)
-    if pos < 0 or pos >= total:
-        print("Out of range.")
-        return None
-
     config = _ensure_config(persist=False)
     preview_chars = int(config.get("preview_chars", DEFAULT_PREVIEW_CHARS))
-
-    _screen_header("RSS News")
-    while True:
-        item = _LAST_ITEMS[pos]
-        print("---")
-        print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18)))
-        if item.get("date"):
-            print("Date:", _clip(item.get("date"), 80))
-        print("Title:")
-        _paged_print(_clip(item.get("title", "(no title)"), MAX_TITLE_CHARS))
-
-        preview = _clip(item.get("summary", ""), preview_chars)
-        if preview:
-            print("Preview:")
-            _paged_print(preview)
-        else:
-            print("Preview: (none)")
-
-        try:
-            cmd = _normalize_nav_cmd(input("n/p/d/q/#/arrows: "))
-        except Exception:
-            cmd = "q"
-
-        if cmd == "q":
-            _clear_screen()
-            return item
-        if cmd == "n":
-            if total > 0:
-                pos = (pos + 1) % total
-            continue
-        if cmd == "p":
-            if total > 0:
-                pos = (pos - 1) % total
-            continue
-        if cmd == "d":
-            read(pos + 1)
-            continue
-
-        try:
-            jump = int(cmd) - 1
-            if 0 <= jump < total:
-                pos = jump
-            else:
-                print("Out of range.")
-        except Exception:
-            print("Use n/p/d/q/# or arrows")
+    return _browse_items(
+        "RSS News",
+        _LAST_ITEMS,
+        index,
+        lambda item, pos, total: _render_news_summary(item, pos, total, preview_chars),
+        _render_news_detail,
+    )
 
 
 def add_feed_prompt():

@@ -3,10 +3,11 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -166,7 +167,7 @@ def now():
 
     print("Weather>", label)
     response = None
-    start = time.ticks_ms()
+    start = _ticks_ms()
 
     try:
         response = requests.get(url)
@@ -199,7 +200,7 @@ def now():
     wtime = cw.get("time", "")
 
     desc = WMO_CODES.get(code, "Code:{}".format(code))
-    elapsed = time.ticks_diff(time.ticks_ms(), start)
+    elapsed = _ticks_diff(_ticks_ms(), start)
 
     print("---")
     print("Location:", label)
@@ -239,7 +240,7 @@ def forecast(days=3):
 
     print("Forecast>", label, "({}d)".format(num_days))
     response = None
-    start = time.ticks_ms()
+    start = _ticks_ms()
 
     try:
         response = requests.get(url)
@@ -270,7 +271,7 @@ def forecast(days=3):
     tmin = daily.get("temperature_2m_min", [])
     codes = daily.get("weathercode", [])
 
-    elapsed = time.ticks_diff(time.ticks_ms(), start)
+    elapsed = _ticks_diff(_ticks_ms(), start)
 
     print("---")
     print("Location:", label)

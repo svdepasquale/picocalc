@@ -2,11 +2,11 @@ import gc
 import os
 import time
 
-from pico_utils import clip, paged_print, normalize_nav_cmd, safe_input
-from pico_utils import clear_screen, screen_header
+from pico_utils import clip, paged_print, paged_lines, preview_print, browse_items, format_bytes
+from pico_utils import screen_header
 
 
-MODULE_VERSION = "2026-03-28.1"
+MODULE_VERSION = "2026-03-28.2"
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 SUPPORTED_EXT = (".mp3", ".wav")
@@ -22,6 +22,65 @@ _AUDIO_PIN = DEFAULT_AUDIO_PIN
 _I2S = None
 _I2S_CONFIG = None
 _SCAN_PATH = "/"
+
+
+def _track_name(filepath):
+    return str(filepath).split("/")[-1]
+
+
+def _track_size_text(filepath):
+    try:
+        st = os.stat(filepath)
+        size = st[6]
+    except Exception:
+        return "?"
+    return format_bytes(size)
+
+
+def _resolve_track(index=None):
+    if not _PLAYLIST:
+        print("Empty playlist.")
+        return None, None
+    if index is None:
+        return _PLAYLIST[_CURRENT_INDEX], _CURRENT_INDEX
+    try:
+        pos = int(index) - 1
+    except Exception:
+        print("Invalid index.")
+        return None, None
+    if pos < 0 or pos >= len(_PLAYLIST):
+        print("Out of range.")
+        return None, None
+    return _PLAYLIST[pos], pos
+
+
+def _render_track_summary(filepath, pos, total):
+    if _PLAYING and pos == _CURRENT_INDEX:
+        state = "Playing"
+    elif pos == _CURRENT_INDEX:
+        state = "Selected"
+    else:
+        state = "Track"
+    print("[{}/{}] {}".format(pos + 1, total, state))
+    print("File:")
+    preview_print(_track_name(filepath), max_lines=2)
+    print("---")
+    print("Path:")
+    preview_print(filepath, max_lines=2)
+    print("Size:", _track_size_text(filepath))
+    print("Vol:", _VOLUME)
+
+
+def _render_track_detail(filepath, pos, total):
+    screen_header("Track Detail")
+    print("[{}/{}]".format(pos + 1, total))
+    print("File:")
+    paged_print(_track_name(filepath))
+    print("Path:")
+    paged_print(filepath)
+    print("Size:", _track_size_text(filepath))
+    print("Vol:", _VOLUME)
+    print("Pin:", _AUDIO_PIN)
 
 
 def _find_audio_files(path="/", recursive=True, _depth=0):
@@ -62,7 +121,7 @@ def scan(path=None):
         return []
     print("Found {} file(s):".format(len(files)))
     for i, f in enumerate(files, 1):
-        name = f.split("/")[-1]
+        name = _track_name(f)
         print("{}: {}".format(i, clip(name, DISPLAY_WIDTH - 4)))
     return files
 
@@ -104,7 +163,7 @@ def add(filepath):
         print("Supported:", ", ".join(SUPPORTED_EXT))
         return False
     _PLAYLIST.append(filepath)
-    name = filepath.split("/")[-1]
+    name = _track_name(filepath)
     print("Added:", clip(name, 26))
     print("Tracks:", len(_PLAYLIST))
     return True
@@ -115,10 +174,12 @@ def playlist():
         print("Empty playlist. Use load().")
         return []
     print("Playlist ({} tracks):".format(len(_PLAYLIST)))
+    lines = []
     for i, f in enumerate(_PLAYLIST, 1):
-        name = f.split("/")[-1]
+        name = _track_name(f)
         marker = ">" if i - 1 == _CURRENT_INDEX else " "
-        print("{}{}: {}".format(marker, i, clip(name, DISPLAY_WIDTH - 5)))
+        lines.append("{}{}: {}".format(marker, i, clip(name, DISPLAY_WIDTH - 5)))
+    paged_lines(lines)
     return _PLAYLIST
 
 
@@ -256,13 +317,22 @@ def _play_wav(filepath):
         if audio is None:
             print("No audio output.")
             return False
-        name = filepath.split("/")[-1]
+        name = _track_name(filepath)
         print("Playing:", clip(name, 24))
         print("{}Hz {}bit {}ch".format(info["rate"], info["bits"], info["channels"]))
         _PLAYING = True
         buf = bytearray(CHUNK_SIZE)
+        view = memoryview(buf)
+        remaining = int(info.get("data_size", 0) or 0)
+        limit_to_data = remaining > 0
         while _PLAYING:
-            n = f.readinto(buf)
+            if limit_to_data:
+                read_size = remaining if remaining < CHUNK_SIZE else CHUNK_SIZE
+                if read_size <= 0:
+                    break
+                n = f.readinto(view[:read_size])
+            else:
+                n = f.readinto(buf)
             if n is None or n == 0:
                 break
             if _VOLUME < 100 and info["bits"] == 16:
@@ -271,6 +341,8 @@ def _play_wav(filepath):
                 audio.write(buf[:n])
             except Exception:
                 break
+            if limit_to_data:
+                remaining -= n
     except KeyboardInterrupt:
         print("Stopped.")
     except Exception as e:
@@ -304,7 +376,7 @@ def play(index=None):
     elif lower.endswith(".mp3"):
         print("MP3 requires decoder hw.")
         print("Convert to WAV for sw playback.")
-        name = filepath.split("/")[-1]
+        name = _track_name(filepath)
         print("File:", clip(name, 26))
         return False
     print("Unsupported format.")
@@ -324,7 +396,7 @@ def next_track():
         print("Empty playlist.")
         return False
     _CURRENT_INDEX = (_CURRENT_INDEX + 1) % len(_PLAYLIST)
-    name = _PLAYLIST[_CURRENT_INDEX].split("/")[-1]
+    name = _track_name(_PLAYLIST[_CURRENT_INDEX])
     print("[{}/{}] {}".format(_CURRENT_INDEX + 1, len(_PLAYLIST), clip(name, 20)))
     return play()
 
@@ -335,7 +407,7 @@ def prev_track():
         print("Empty playlist.")
         return False
     _CURRENT_INDEX = (_CURRENT_INDEX - 1) % len(_PLAYLIST)
-    name = _PLAYLIST[_CURRENT_INDEX].split("/")[-1]
+    name = _track_name(_PLAYLIST[_CURRENT_INDEX])
     print("[{}/{}] {}".format(_CURRENT_INDEX + 1, len(_PLAYLIST), clip(name, 20)))
     return play()
 
@@ -344,7 +416,7 @@ def now_playing():
     if not _PLAYLIST:
         print("Empty playlist.")
         return None
-    name = _PLAYLIST[_CURRENT_INDEX].split("/")[-1]
+    name = _track_name(_PLAYLIST[_CURRENT_INDEX])
     state = "Playing" if _PLAYING else "Stopped"
     print("[{}/{}] {}".format(_CURRENT_INDEX + 1, len(_PLAYLIST), state))
     print(clip(name, DISPLAY_WIDTH))
@@ -384,34 +456,10 @@ def set_pin(pin):
 
 
 def info(index=None):
-    if not _PLAYLIST:
-        print("Empty playlist.")
+    filepath, pos = _resolve_track(index)
+    if filepath is None:
         return None
-    if index is None:
-        pos = _CURRENT_INDEX
-    else:
-        try:
-            pos = int(index) - 1
-        except Exception:
-            print("Invalid index.")
-            return None
-    if pos < 0 or pos >= len(_PLAYLIST):
-        print("Out of range.")
-        return None
-    filepath = _PLAYLIST[pos]
-    name = filepath.split("/")[-1]
-    print("[{}/{}]".format(pos + 1, len(_PLAYLIST)))
-    print("File:", clip(name, 26))
-    print("Path:", clip(filepath, 26))
-    try:
-        st = os.stat(filepath)
-        size = st[6]
-        if size >= 1024:
-            print("Size: {}KB".format(size // 1024))
-        else:
-            print("Size: {}B".format(size))
-    except Exception:
-        print("Size: ?")
+    _render_track_detail(filepath, pos, len(_PLAYLIST))
     return filepath
 
 
@@ -419,48 +467,13 @@ def browse():
     if not _PLAYLIST:
         print("Empty playlist. Use load().")
         return None
-    total = len(_PLAYLIST)
-    pos = _CURRENT_INDEX
-    screen_header("MP3 Player")
-    while True:
-        name = _PLAYLIST[pos].split("/")[-1]
-        state = " *" if _PLAYING and pos == _CURRENT_INDEX else ""
-        print("---")
-        print("[{}/{}]{}".format(pos + 1, total, state))
-        print(clip(name, DISPLAY_WIDTH))
-        try:
-            st = os.stat(_PLAYLIST[pos])
-            size = st[6]
-            if size >= 1024:
-                print("{}KB".format(size // 1024))
-            else:
-                print("{}B".format(size))
-        except Exception:
-            pass
-        try:
-            cmd = normalize_nav_cmd(safe_input("n/p/P/q/#/arrows: "))
-        except Exception:
-            cmd = "q"
-        if cmd == "q":
-            clear_screen()
-            return _PLAYLIST[pos]
-        if cmd == "n":
-            pos = (pos + 1) % total
-            continue
-        if cmd == "p":
-            pos = (pos - 1) % total
-            continue
-        if cmd == "d":
-            info(pos + 1)
-            continue
-        try:
-            jump = int(cmd) - 1
-            if 0 <= jump < total:
-                pos = jump
-            else:
-                print("Out of range.")
-        except Exception:
-            print("Use n/p/d/q/# or arrows")
+    return browse_items(
+        "MP3 Player",
+        _PLAYLIST,
+        _CURRENT_INDEX + 1,
+        _render_track_summary,
+        _render_track_detail,
+    )
 
 
 def ver():
