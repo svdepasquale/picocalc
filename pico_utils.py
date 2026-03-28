@@ -9,7 +9,7 @@ except ImportError:
 
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 
 
 def clip(text, limit):
@@ -57,6 +57,18 @@ def wrap_text(text, width=DISPLAY_WIDTH):
     return wrapped
 
 
+def clear_screen():
+    print("\x1b[2J\x1b[H", end="")
+
+
+def screen_header(title):
+    clear_screen()
+    bar = "=" * DISPLAY_WIDTH
+    print(bar)
+    print(title.center(DISPLAY_WIDTH))
+    print(bar)
+
+
 def paged_print(text, page_lines=PAGE_LINES):
     lines = wrap_text(text)
     if not lines:
@@ -70,7 +82,7 @@ def paged_print(text, page_lines=PAGE_LINES):
         count += 1
         if count >= page_lines and index < total - 1:
             try:
-                answer = input("--more-- q=stop: ")
+                answer = input("Enter=next q=stop: ")
             except Exception:
                 answer = ""
             cmd = normalize_nav_cmd(answer)

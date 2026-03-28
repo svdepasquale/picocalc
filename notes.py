@@ -5,13 +5,14 @@ from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
 from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
 from pico_utils import load_json, save_json
+from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
 
 
 DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 
 _NOTES = None
 
@@ -260,6 +261,7 @@ def view(index=1):
         print("Out of range.")
         return None
 
+    _screen_header("Notes")
     while True:
         note = notes[pos]
         mark = " [DONE]" if note.get("done") else ""
@@ -278,6 +280,7 @@ def view(index=1):
             cmd = "q"
 
         if cmd == "q":
+            _clear_screen()
             return note
         if cmd == "n":
             pos = (pos + 1) % total
@@ -305,10 +308,19 @@ def ver():
 
 
 def help():
-    print("cmd: add add_lines add_prompt")
-    print("cmd: ls show view edit rm")
-    print("cmd: done undone clear_done count")
-    print("cmd: ver help h")
+    print("-- Notes --")
+    print("add(text)     Add a note")
+    print("add_lines()   Multi-line note")
+    print("add_prompt()  Guided add")
+    print("ls()/l()      List all notes")
+    print("show(#)/s(#)  Show full note")
+    print("view(#)/v(#)  Browse notes")
+    print("edit(#,text)  Edit note body")
+    print("rm(#)         Delete note")
+    print("done(#)       Mark as done")
+    print("undone(#)     Mark as open")
+    print("clear_done()  Remove done notes")
+    print("count()       Show stats")
     print("tip: import notes as t")
 
 

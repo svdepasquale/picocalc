@@ -3,9 +3,10 @@ import os
 import time
 
 from pico_utils import clip, paged_print, normalize_nav_cmd, safe_input
+from pico_utils import clear_screen, screen_header
 
 
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 SUPPORTED_EXT = (".mp3", ".wav")
@@ -420,6 +421,7 @@ def browse():
         return None
     total = len(_PLAYLIST)
     pos = _CURRENT_INDEX
+    screen_header("MP3 Player")
     while True:
         name = _PLAYLIST[pos].split("/")[-1]
         state = " *" if _PLAYING and pos == _CURRENT_INDEX else ""
@@ -440,6 +442,7 @@ def browse():
         except Exception:
             cmd = "q"
         if cmd == "q":
+            clear_screen()
             return _PLAYLIST[pos]
         if cmd == "n":
             pos = (pos + 1) % total
@@ -466,11 +469,21 @@ def ver():
 
 
 def help():
-    print("cmd: scan load add playlist clear")
-    print("cmd: play stop next_track prev_track")
-    print("cmd: now_playing browse info")
-    print("cmd: volume set_pin")
-    print("cmd: ver help h")
+    print("-- MP3 Player --")
+    print("scan(path)    Find audio files")
+    print("load(path)    Load playlist")
+    print("add(file)     Add single track")
+    print("playlist()    Show playlist")
+    print("clear()       Clear playlist")
+    print("play(#)/p(#)  Play track")
+    print("stop()/s()    Stop playback")
+    print("next_track()  Next / n()")
+    print("prev_track()  Previous / pr()")
+    print("now_playing()  Current / np()")
+    print("browse()/b()  Browse tracks")
+    print("info(#)       Track details")
+    print("volume(0-100) Set volume / v()")
+    print("set_pin(#)    Audio output pin")
     print("tip: import mp3_player as mp")
 
 
