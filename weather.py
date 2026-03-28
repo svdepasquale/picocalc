@@ -6,8 +6,9 @@ from pico_utils import load_json, save_json, http_module as _http_module, check_
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
 DEFAULT_LON = 12.5
 
@@ -82,6 +83,62 @@ def set_location(lat, lon, name=""):
     label = _location_label(config["name"], lat_f, lon_f)
     print("Location:", label)
     return True
+
+
+def set_city(name):
+    city = str(name).strip()
+    if city == "":
+        print("Empty city name.")
+        return False
+
+    requests = _http_module()
+    if requests is None:
+        return False
+
+    if not check_wifi():
+        return False
+
+    url = "{}?name={}&count=1&language=en&format=json".format(
+        GEOCODING_URL, city.replace(" ", "+")
+    )
+
+    print("Looking up:", _clip(city, 24))
+    response = None
+    try:
+        response = requests.get(url)
+        status = response.status_code
+        if status != 200:
+            print("HTTP:", status)
+            return False
+        data = response.json()
+    except Exception as e:
+        print("Err:", _clip(e, 24))
+        return False
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
+    results = data.get("results")
+    if not isinstance(results, list) or not results:
+        print("City not found:", _clip(city, 20))
+        return False
+
+    match = results[0]
+    lat = match.get("latitude")
+    lon = match.get("longitude")
+    found_name = match.get("name", city)
+    country = match.get("country", "")
+    label = found_name
+    if country:
+        label = "{}, {}".format(found_name, country)
+
+    del data
+    gc.collect()
+
+    return set_location(lat, lon, _clip(label, 28))
 
 
 def show_location():
@@ -238,9 +295,14 @@ def ver():
 
 
 def help():
-    print("cmd: now forecast")
-    print("cmd: set_location show_location")
-    print("cmd: ver help h")
+    print("-- Weather --")
+    print("now()/w()     Current weather")
+    print("forecast(d)   Forecast 1-7 days")
+    print("  fc(d)       Alias for forecast")
+    print("set_city(name)  Set by city")
+    print("set_location(lat,lon,name)")
+    print("  Set by coordinates")
+    print("show_location() Show location")
     print("tip: import weather as m")
 
 
@@ -254,3 +316,7 @@ def w():
 
 def fc(days=3):
     return forecast(days)
+
+
+def sc(name):
+    return set_city(name)

@@ -4,7 +4,7 @@ from pico_utils import load_json, save_json
 
 
 CONFIG_FILE = "clock_config.json"
-MODULE_VERSION = "2026-03-01.2"
+MODULE_VERSION = "2026-03-28.1"
 NTP_HOST = "pool.ntp.org"
 DEFAULT_UTC_OFFSET = 0
 MAX_NTP_RETRIES = 2
@@ -187,11 +187,17 @@ def ver():
 
 
 def help():
-    print("cmd: sync now utc date epoch")
-    print("cmd: set_utc_offset")
-    print("cmd: timer_start timer_stop")
-    print("cmd: timer_check countdown")
-    print("cmd: ver help h")
+    print("-- Clock NTP --")
+    print("sync()        Sync time via NTP")
+    print("now()/n()     Local time")
+    print("utc()         UTC time")
+    print("date()/d()    Date with day name")
+    print("epoch()       Unix timestamp")
+    print("set_utc_offset(h)  Timezone")
+    print("timer_start()/ts() Start timer")
+    print("timer_stop()/tp()  Stop timer")
+    print("timer_check()/tc() Check timer")
+    print("countdown(s)/cd(s) Countdown")
     print("tip: import clock_ntp as c")
 
 

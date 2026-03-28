@@ -3,7 +3,7 @@ import os
 import time
 
 
-MODULE_VERSION = "2026-03-01.2"
+MODULE_VERSION = "2026-03-28.1"
 PAGE_LINES = 8
 _BOOT_TICKS = time.ticks_ms()
 
@@ -91,7 +91,7 @@ def ls(path="/"):
             line_count += 1
             if line_count >= PAGE_LINES:
                 try:
-                    answer = input("--more-- q=stop: ").strip().lower()
+                    answer = input("Enter=next q=stop: ").strip().lower()
                 except Exception:
                     answer = ""
                 if answer == "q":
@@ -137,9 +137,15 @@ def ver():
 
 
 def help():
-    print("cmd: info ram flash uptime")
-    print("cmd: ip freq ls df gc_run")
-    print("cmd: ver help h")
+    print("-- System Status --")
+    print("info()/a()    Show all info")
+    print("ram()         RAM usage")
+    print("flash()/df()  Flash storage")
+    print("uptime()      Time since boot")
+    print("ip()          Network info")
+    print("freq()        CPU frequency")
+    print("ls(path)      List directory")
+    print("gc_run()      Run GC + stats")
     print("tip: import sys_status as s")
 
 

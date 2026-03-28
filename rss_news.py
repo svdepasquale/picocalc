@@ -5,6 +5,7 @@ from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
 from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
 
 
 CONFIG_FILE = "rss_feeds.json"
@@ -14,7 +15,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 
 DEFAULT_FEEDS = [
     {"name": "CNN", "url": "https://rss.cnn.com/rss/edition.rss"},
@@ -566,6 +567,7 @@ def view(index=1):
     config = _ensure_config(persist=False)
     preview_chars = int(config.get("preview_chars", DEFAULT_PREVIEW_CHARS))
 
+    _screen_header("RSS News")
     while True:
         item = _LAST_ITEMS[pos]
         print("---")
@@ -588,6 +590,7 @@ def view(index=1):
             cmd = "q"
 
         if cmd == "q":
+            _clear_screen()
             return item
         if cmd == "n":
             if total > 0:
@@ -641,11 +644,18 @@ def ver():
 
 
 def help():
-    print("cmd: latest view read")
-    print("cmd: feeds add_feed rm_feed")
-    print("cmd: add_feed_prompt reset_feeds")
-    print("cmd: set_preview set_items_per_feed")
-    print("cmd: setup ver help h")
+    print("-- RSS News --")
+    print("latest()/l()  Fetch news")
+    print("view(#)/v(#)  Browse articles")
+    print("read(#)/r(#)  Read full article")
+    print("feeds()/f()   List feeds")
+    print("add_feed(n,u) Add feed by url")
+    print("add_feed_prompt()  Add guided")
+    print("rm_feed(#)    Remove feed")
+    print("reset_feeds() Restore defaults")
+    print("set_preview(n)  Preview chars")
+    print("set_items_per_feed(n)  Per feed")
+    print("setup()       Show settings")
     print("tip: import rss_news as n")
 
 

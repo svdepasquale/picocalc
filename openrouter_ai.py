@@ -5,6 +5,7 @@ from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
 from pico_utils import normalize_nav_cmd as _normalize_nav_cmd
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import clear_screen as _clear_screen, screen_header as _screen_header
 
 try:
     import ujson as json
@@ -19,7 +20,7 @@ DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char displ
 DISPLAY_WIDTH = 32
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -244,6 +245,7 @@ def view(index=1):
         print("Out of range.")
         return None
 
+    _screen_header("AI Responses")
     while True:
         item = _LAST_RESPONSES[pos]
         print("---")
@@ -260,6 +262,7 @@ def view(index=1):
             cmd = "q"
 
         if cmd == "q":
+            _clear_screen()
             return item
         if cmd == "n":
             if total > 0:
@@ -383,14 +386,16 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
 
 def chat(with_view=False):
-    print("AI chat. Empty=exit")
+    _screen_header("AI Chat")
+    print("Type q or empty line to exit")
+    print("")
     while True:
         try:
             prompt = input("Q> ").strip()
         except Exception:
             prompt = ""
 
-        if prompt == "":
+        if prompt == "" or prompt in ("q", "quit", "exit"):
             print("Bye")
             return
 
@@ -409,13 +414,23 @@ def ver():
 
 
 def help():
-    print("cmd: ver ask chat chat_view")
-    print("cmd: set_api_key set_model")
-    print("cmd: set_system_prompt clear_system_prompt")
-    print("cmd: presets preset p")
-    print("cmd: mem_on mem_off mem_status mem_clear")
-    print("cmd: responses resp_clear view v")
-    print("cmd: show_config help h")
+    print("-- OpenRouter AI --")
+    print("ask(prompt)   Send a question")
+    print("chat()        Interactive chat")
+    print("chat_view()   Chat + viewer")
+    print("view(#)/v(#)  Browse responses")
+    print("responses()   List cached")
+    print("resp_clear()  Clear cache")
+    print("set_api_key() Set API key")
+    print("set_model()   Change AI model")
+    print("set_system_prompt() Set prompt")
+    print("clear_system_prompt() Reset")
+    print("presets()     List presets")
+    print("preset(name)  Apply preset")
+    print("mem_on/off()  Toggle memory")
+    print("mem_status()  Show memory info")
+    print("mem_clear()   Clear memory")
+    print("show_config() Show settings")
     print("tip: import openrouter_ai as ai")
 
 

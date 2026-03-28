@@ -16,7 +16,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-02-15.17"
+WIFI_MANAGER_VERSION = "2026-03-28.1"
 _NETWORK_MODULE = None
 
 
@@ -342,8 +342,10 @@ def ver():
 
 
 def help():
-    print("cmd: ver ac acs st")
-    print("cmd: help h")
+    print("-- WiFi Manager --")
+    print("ac()     Auto-connect/prompt")
+    print("acs()    Auto-connect silent")
+    print("st()     Connection status")
     print("tip: import wifi_manager as w")
 
 

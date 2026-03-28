@@ -1,10 +1,10 @@
 import gc
 import math
 
-from pico_utils import clip, paged_print, safe_input
+from pico_utils import clip, paged_print, safe_input, clear_screen, screen_header
 
 
-MODULE_VERSION = "2026-03-22.1"
+MODULE_VERSION = "2026-03-28.1"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
 DEG_MODE = False
@@ -298,7 +298,10 @@ def clear_history():
 
 
 def calc():
-    print("Calc. Empty=exit")
+    screen_header("Calculator")
+    print("Type expression, h=help, q=exit")
+    print("Mode:", "deg" if DEG_MODE else "rad")
+    print("")
     while True:
         try:
             expr = safe_input("> ").strip()
@@ -346,16 +349,27 @@ def ver():
 
 
 def help():
-    print("cmd: sin cos tan asin acos atan")
-    print("cmd: sqrt log log10 log2 exp")
-    print("cmd: power factorial abs_val")
-    print("cmd: ceil floor hypot pi e")
-    print("cmd: deg rad mode d2r r2d")
-    print("cmd: c2f f2c km2mi mi2km")
-    print("cmd: store recall variables")
-    print("cmd: clear_vars last history")
-    print("cmd: clear_history calc")
-    print("cmd: ver help h")
+    print("-- Scientific Calculator --")
+    print("calc()        Interactive mode")
+    print("sin cos tan   Trig functions")
+    print("asin acos atan  Inverse trig")
+    print("sqrt log exp  Math functions")
+    print("log10 log2    Logarithms")
+    print("power(b,e)    Exponentiation")
+    print("factorial(n)  Factorial")
+    print("abs_val ceil floor  Rounding")
+    print("hypot(x,y)    Hypotenuse")
+    print("pi() e()      Constants")
+    print("deg() rad()   Set angle mode")
+    print("mode()        Show angle mode")
+    print("d2r() r2d()   Deg/rad convert")
+    print("c2f() f2c()   Temp convert")
+    print("km2mi() mi2km()  Dist convert")
+    print("store(n,v)    Save variable")
+    print("recall(n)     Load variable")
+    print("variables()   List variables")
+    print("history()     Show history")
+    print("last()        Last result")
     print("tip: import scientific_calc as sc")
 
 
