@@ -398,8 +398,12 @@ def piano():
         print("[z][x][c][v][b][n][m]")
         print(" C  D  E  F  G  A  B")
         print("=" * DISPLAY_WIDTH)
-        print("Oct:{} {} Vol:{}".format(_oct, _wave[:3], _vol))
-        print("Out:{} +/-oct 1-4wave".format(out))
+        wave_label = "sq" if _use_pwm else _wave[:3]
+        print("Oct:{} {} Vol:{}".format(_oct, wave_label, _vol))
+        if _use_pwm:
+            print("Out:{} +/-oct (waves: I2S only)".format(out))
+        else:
+            print("Out:{} +/-oct 1-4wave".format(out))
         print("q=quit r=redraw")
 
     _show_piano()
