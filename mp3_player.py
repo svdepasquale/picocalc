@@ -19,6 +19,7 @@ _PLAYING = False
 _VOLUME = DEFAULT_VOLUME
 _AUDIO_PIN = DEFAULT_AUDIO_PIN
 _I2S = None
+_I2S_CONFIG = None
 _SCAN_PATH = "/"
 
 
@@ -130,24 +131,28 @@ def clear():
     return True
 
 
-def _init_audio():
-    global _I2S
-    if _I2S is not None:
+def _init_audio(rate=44100, bits=16, channels=1):
+    global _I2S, _I2S_CONFIG
+    config = (rate, bits, channels)
+    if _I2S is not None and _I2S_CONFIG == config:
         return _I2S
+    _deinit_audio()
     try:
         from machine import I2S, Pin
 
+        fmt = I2S.MONO if channels <= 1 else I2S.STEREO
         _I2S = I2S(
             0,
             sck=Pin(16),
             ws=Pin(17),
             sd=Pin(_AUDIO_PIN),
             mode=I2S.TX,
-            bits=16,
-            format=I2S.MONO,
-            rate=44100,
+            bits=bits,
+            format=fmt,
+            rate=rate,
             ibuf=4096,
         )
+        _I2S_CONFIG = config
         return _I2S
     except ImportError:
         print("No I2S module.")
@@ -158,13 +163,14 @@ def _init_audio():
 
 
 def _deinit_audio():
-    global _I2S
+    global _I2S, _I2S_CONFIG
     if _I2S is not None:
         try:
             _I2S.deinit()
         except Exception:
             pass
         _I2S = None
+    _I2S_CONFIG = None
 
 
 def _scale_volume(buf, n):
@@ -231,10 +237,6 @@ def _parse_wav_header(f):
 
 def _play_wav(filepath):
     global _PLAYING
-    audio = _init_audio()
-    if audio is None:
-        print("No audio output.")
-        return False
     try:
         f = open(filepath, "rb")
     except Exception as e:
@@ -244,7 +246,14 @@ def _play_wav(filepath):
         info = _parse_wav_header(f)
         if info is None:
             print("Invalid WAV file.")
-            f.close()
+            return False
+        audio = _init_audio(
+            rate=info["rate"],
+            bits=info["bits"],
+            channels=info["channels"],
+        )
+        if audio is None:
+            print("No audio output.")
             return False
         name = filepath.split("/")[-1]
         print("Playing:", clip(name, 24))

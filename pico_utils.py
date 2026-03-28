@@ -107,13 +107,14 @@ def normalize_nav_cmd(raw):
 
 
 def load_json(filepath):
-    try:
-        with open(filepath, "r") as f:
-            data = json.load(f)
-            if isinstance(data, (dict, list)):
-                return data
-    except Exception:
-        pass
+    for path in (filepath, filepath + ".tmp", filepath + ".bak"):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+                if isinstance(data, (dict, list)):
+                    return data
+        except Exception:
+            pass
     return None
 
 

@@ -8,13 +8,6 @@ PAGE_LINES = 8
 _BOOT_TICKS = time.ticks_ms()
 
 
-def _clip(text, limit):
-    value = str(text)
-    if len(value) <= limit:
-        return value
-    return value[:limit]
-
-
 def ram():
     gc.collect()
     free = gc.mem_free()
