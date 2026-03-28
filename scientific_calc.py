@@ -299,7 +299,7 @@ def clear_history():
 
 def calc():
     screen_header("Calculator")
-    print("Type expression, h=help, q=exit")
+    print("Type expression, h=help, q/quit/exit or empty line to exit")
     print("Mode:", "deg" if DEG_MODE else "rad")
     print("")
     while True:
