@@ -124,6 +124,8 @@ def set_city(name):
     results = data.get("results")
     if not isinstance(results, list) or not results:
         print("City not found:", _clip(city, 20))
+        del data
+        gc.collect()
         return False
 
     match = results[0]
