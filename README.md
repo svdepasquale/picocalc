@@ -1,6 +1,6 @@
 # PicoCalc Toolkit (Manual Workflow)
 
-Minimal Wi-Fi + AI + RSS + Clock + Notes + Weather + Scientific Calculator + MP3 Player + System toolkit for PicoCalc + Pico 2W, optimized for small display and keyboard.
+Minimal Wi-Fi + AI + RSS + Clock + Notes + Weather + Scientific Calculator + MP3 Player + Synthesizer + System toolkit for PicoCalc + Pico 2W, optimized for small display and keyboard.
 
 Screen tuning in this version:
 - shared viewer layout across AI, RSS, Notes, MP3
@@ -20,6 +20,7 @@ Screen tuning in this version:
 - `weather.py` → current weather + forecast via Open-Meteo (free, no API key)
 - `scientific_calc.py` → scientific calculator with trig, log, conversions, history
 - `mp3_player.py` → audio file player with playlist and browser
+- `synthesizer.py` → tone/note/sequence synthesizer with piano interactive mode
 
 Copy all `.py` files to Pico root.
 
@@ -339,6 +340,58 @@ Notes:
 3. Run `import wifi_manager as w; w.ac()`.
 4. Run other commands after Wi-Fi is connected.
 
+## Synthesizer
+Software tone/note synthesizer. Supports I2S output (external DAC) and PWM output (built-in PicoCalc speaker/buzzer).
+
+Audio output modes:
+- **I2S mode** (default): uses SCK=GP16, WS=GP17, SD=GP28 (external DAC); produces sine/square/saw/triangle waveforms
+- **PWM mode** (built-in PicoCalc speaker): uses GPIO pin 22 by default; produces square waves; enable with `sy.use_pwm(True)`
+
+Quick start (PicoCalc built-in speaker):
+1. `import synthesizer as sy`
+2. `sy.use_pwm(True)` → switch to PWM output
+3. `sy.tone(440, 500)` → play 440 Hz for 500 ms
+4. `sy.piano()` → interactive keyboard mode
+
+Quick start (external I2S DAC):
+1. Connect DAC: SCK→GP16, WS→GP17, SD→GP28
+2. `import synthesizer as sy`
+3. `sy.piano()` → interactive keyboard mode
+
+Commands:
+- `import synthesizer as sy`
+- `sy.piano()` → interactive ASCII keyboard (keys play notes, r=redraw, q=exit)
+- `sy.tone(hz, ms)` → play frequency in Hz for ms milliseconds
+- `sy.note('C4', ms)` → play note by name (C4, A#5, Db3, -)
+- `sy.seq('C D E F G A B')` → play space-separated note sequence (- or r = rest)
+- `sy.demo('scale')` → play a demo melody (scale, twinkle, ode)
+- `sy.wave('sine')` → set waveform: sine, square, saw, triangle (I2S only)
+- `sy.octave(4)` → set octave (0..8)
+- `sy.volume(70)` → set volume (0..100)
+- `sy.bpm(120)` → set tempo
+- `sy.duration(200)` → set note duration in ms
+- `sy.use_pwm(True)` → use PWM output (built-in speaker, pin 22)
+- `sy.use_pwm(False)` → use I2S output (external DAC)
+- `sy.set_pwm_pin(22)` → change PWM output pin
+- `sy.set_pin(28)` → change I2S SD pin
+- `sy.close()` → release audio hardware
+- `sy.ver()` / `sy.help()` / `sy.h()`
+
+Piano keyboard layout:
+```
+  C# D#    F# G# A#
+  s  d     g  h  j
+[z][x][c][v][b][n][m]
+ C  D  E  F  G  A  B
+```
+Controls: +/- octave, 1-4 waveform, r redraw, q quit
+
+Troubleshooting:
+- No sound from PicoCalc speaker: run `sy.use_pwm(True)` then `sy.tone(440, 300)`
+- If wrong pin: run `sy.set_pwm_pin(n)` with correct pin number
+- PWM produces square waves only; for other waveforms use I2S mode with external DAC
+- Ctrl+C exits piano mode cleanly and clears the screen
+
 ## Remove old startup files on PicoCalc
 Run in REPL:
 - `import os`
@@ -361,6 +414,9 @@ Run in REPL:
 - If NTP sync fails: check Wi-Fi connection, retry `c.sync()`.
 - If ntptime missing: run `import mip; mip.install('ntptime')`.
 - If weather shows wrong location: run `m.set_city('Rome')` or `m.set_location(lat, lon, 'name')`.
+- If synthesizer makes no sound: run `sy.use_pwm(True)` then `sy.tone(440, 300)` (built-in speaker mode).
+- If PWM pin is wrong for your hardware: run `sy.set_pwm_pin(n)` with the correct GPIO pin number.
+- Old interactive UI stays on screen after exit: this is fixed in version 2026-03-28.3 (clear on exit).
 
 ## Known limitations
 - **Uptime**: `s.uptime()` resets after ~12-25 days (MicroPython `ticks_ms` overflow). Mitigated with `ticks_diff` but still wraps on very long runs.
@@ -381,16 +437,18 @@ import notes as t          # t.l() t.s(1) t.v(1)
 import weather as m        # m.w() m.fc() m.sc('Rome')
 import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
 import mp3_player as mp    # mp.p() mp.s() mp.n() mp.b()
+import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
 - `pico_utils`: `2026-03-28.2`
 - `wifi_manager`: `2026-03-28.2`
-- `openrouter_ai`: `2026-03-28.2`
+- `openrouter_ai`: `2026-03-28.3`
 - `rss_news`: `2026-03-28.2`
 - `sys_status`: `2026-03-28.2`
 - `clock_ntp`: `2026-03-28.2`
 - `notes`: `2026-03-28.2`
 - `weather`: `2026-03-28.2`
-- `scientific_calc`: `2026-03-28.2`
+- `scientific_calc`: `2026-03-28.3`
 - `mp3_player`: `2026-03-28.2`
+- `synthesizer`: `2026-03-28.3`

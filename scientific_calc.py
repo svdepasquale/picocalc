@@ -4,7 +4,7 @@ import math
 from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen, screen_header
 
 
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-03-28.3"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
@@ -352,40 +352,43 @@ def clear_history():
 
 def calc():
     screen_header("Calculator")
-    print("Type expression, h=help, q/quit/exit or empty line to exit")
+    print("expr h=help q/empty=exit")
     print("Mode:", "deg" if DEG_MODE else "rad")
     print("")
-    while True:
-        try:
-            expr = safe_input("> ").strip()
-        except Exception:
-            expr = ""
+    try:
+        while True:
+            try:
+                expr = safe_input("> ").strip()
+            except Exception:
+                expr = ""
 
-        if expr == "":
-            print("Bye")
-            return
+            if expr == "":
+                break
 
-        if expr in ("q", "quit", "exit"):
-            print("Bye")
-            return
+            if expr in ("q", "quit", "exit"):
+                break
 
-        if expr == "h":
-            help()
-            continue
+            if expr == "h":
+                help()
+                continue
 
-        if len(expr) > MAX_EXPR_LEN:
-            print("Too long (max {}).".format(MAX_EXPR_LEN))
-            continue
+            if len(expr) > MAX_EXPR_LEN:
+                print("Too long (max {}).".format(MAX_EXPR_LEN))
+                continue
 
-        try:
-            namespace = _calc_namespace()
-            result = eval(expr, {"__builtins__": {}}, namespace)
-            _print_result(expr, result)
-        except MemoryError:
-            print("Too complex.")
-            gc.collect()
-        except Exception as err:
-            print("Err:", clip(str(err), 26))
+            try:
+                namespace = _calc_namespace()
+                result = eval(expr, {"__builtins__": {}}, namespace)
+                _print_result(expr, result)
+            except MemoryError:
+                print("Too complex.")
+                gc.collect()
+            except Exception as err:
+                print("Err:", clip(str(err), 26))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        clear_screen()
 
 
 def ver():
