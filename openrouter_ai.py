@@ -8,7 +8,7 @@ from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
-from pico_utils import screen_header as _screen_header
+from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
 
 try:
     import ujson as json
@@ -23,7 +23,7 @@ DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char displ
 DISPLAY_WIDTH = 32
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-03-28.3"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -385,21 +385,25 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
 def chat(with_view=False):
     _screen_header("AI Chat")
-    print("Type q or empty line to exit")
+    print("q or empty line to exit")
     print("")
-    while True:
-        try:
-            prompt = input("Q> ").strip()
-        except Exception:
-            prompt = ""
+    try:
+        while True:
+            try:
+                prompt = input("Q> ").strip()
+            except Exception:
+                prompt = ""
 
-        if prompt == "" or prompt in ("q", "quit", "exit"):
-            print("Bye")
-            return
+            if prompt == "" or prompt in ("q", "quit", "exit"):
+                break
 
-        ask(prompt)
-        if with_view and _LAST_RESPONSES:
-            view(len(_LAST_RESPONSES))
+            ask(prompt)
+            if with_view and _LAST_RESPONSES:
+                view(len(_LAST_RESPONSES))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _clear_screen()
 
 
 def chat_view():

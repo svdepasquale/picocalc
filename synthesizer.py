@@ -7,6 +7,7 @@ from array import array
 
 from pico_utils import (
     clip as _clip,
+    clear_screen as _clear_screen,
     screen_header as _screen_header,
     safe_input as _safe_input,
     sleep_ms as _sleep_ms,
@@ -14,7 +15,7 @@ from pico_utils import (
 )
 
 
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-03-28.3"
 
 # ── audio ───────────────────────────────────────
 SAMPLE_RATE = 22050
@@ -23,7 +24,9 @@ BUF_SZ = CHUNK * 2
 TBL_LEN = 256
 
 # ── state ───────────────────────────────────────
-_pin = 28
+_pin = 28        # I2S SD (data) pin
+_pwm_pin = 22    # PWM buzzer pin (PicoCalc built-in speaker)
+_use_pwm = False # True = use PWM output instead of I2S
 _vol = 70
 _wave = "sine"
 _oct = 4
@@ -144,13 +147,8 @@ def _parse_note(text):
 
 # ── core tone generation ────────────────────────
 
-def _play_freq(freq, dur_ms):
-    """Generate and play a tone via I2S."""
-    if freq <= 0 or dur_ms <= 0:
-        if dur_ms > 0:
-            _sleep_ms(int(dur_ms))
-        return True
-
+def _play_freq_i2s(freq, dur_ms):
+    """Generate and play a tone via I2S DAC."""
     _build_table()
     audio = _init_audio()
     if audio is None:
@@ -211,6 +209,45 @@ def _play_freq(freq, dur_ms):
         pass
 
     return True
+
+
+def _play_freq_pwm(freq, dur_ms):
+    """Play a square-wave tone via PWM (PicoCalc built-in speaker)."""
+    try:
+        from machine import PWM, Pin
+        pwm = PWM(Pin(_pwm_pin))
+        hz = max(20, min(20000, int(freq)))
+        pwm.freq(hz)
+        duty = max(0, min(65535, int(32768 * _vol // 100)))
+        pwm.duty_u16(duty)
+        try:
+            _sleep_ms(int(dur_ms))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            pwm.duty_u16(0)
+            pwm.deinit()
+        return True
+    except ImportError:
+        print("No machine module (not MicroPython?).")
+        return False
+    except Exception as e:
+        print("PWM err:", _clip(str(e), 22))
+        return False
+
+
+def _play_freq(freq, dur_ms):
+    """Route audio to I2S or PWM based on current mode."""
+    if freq <= 0 or dur_ms <= 0:
+        if dur_ms > 0:
+            _sleep_ms(int(dur_ms))
+        return True
+    if _use_pwm:
+        return _play_freq_pwm(freq, dur_ms)
+    ok = _play_freq_i2s(freq, dur_ms)
+    if not ok:
+        print("I2S unavail. Try: use_pwm(True)")
+    return ok
 
 
 # ── public API ──────────────────────────────────
@@ -353,45 +390,57 @@ def seq(pattern, ms=None):
 
 def piano():
     """Interactive piano keyboard."""
-    _screen_header("Synthesizer")
-    print("zxcvbnm = C D E F G A B")
-    print("sd ghj  = C#D# F#G#A#")
-    print("+/- oct | 1-4 wave")
-    print("q=quit Oct:{} {} Vol:{}".format(
-        _oct, _wave, _vol))
-    print("")
+    def _show_piano():
+        _screen_header("~~ Synthesizer ~~")
+        out = "PWM" if _use_pwm else "I2S"
+        print("  C# D#    F# G# A#")
+        print("  s  d     g  h  j")
+        print("[z][x][c][v][b][n][m]")
+        print(" C  D  E  F  G  A  B")
+        print("=" * DISPLAY_WIDTH)
+        print("Oct:{} {} Vol:{}".format(_oct, _wave[:3], _vol))
+        print("Out:{} +/-oct 1-4wave".format(out))
+        print("q=quit r=redraw")
 
-    while True:
-        try:
-            raw = _safe_input("> ").strip().lower()
-        except Exception:
-            raw = ""
+    _show_piano()
+    try:
+        while True:
+            try:
+                raw = _safe_input("> ").strip().lower()
+            except Exception:
+                raw = ""
 
-        if raw == "" or raw == "q":
-            print("Bye")
-            _deinit_audio()
-            gc.collect()
-            return
+            if raw == "" or raw == "q":
+                break
 
-        if raw == "+":
-            octave(min(_oct + 1, 8))
-            continue
-        if raw == "-":
-            octave(max(_oct - 1, 0))
-            continue
-        if raw in ("1", "2", "3", "4"):
-            wave(WAVES[int(raw) - 1])
-            continue
+            if raw == "+":
+                octave(min(_oct + 1, 8))
+                continue
+            if raw == "-":
+                octave(max(_oct - 1, 0))
+                continue
+            if raw in ("1", "2", "3", "4"):
+                wave(WAVES[int(raw) - 1])
+                continue
+            if raw == "r":
+                _show_piano()
+                continue
 
-        played = []
-        for ch in raw:
-            if ch in _KEYS:
-                semi = _KEYS[ch]
-                midi = (_oct + 1) * 12 + semi
-                _play_freq(_midi_freq(midi), _dur)
-                played.append(NOTE_NAMES[semi])
-        if played:
-            print(" ".join(played))
+            played = []
+            for ch in raw:
+                if ch in _KEYS:
+                    semi = _KEYS[ch]
+                    midi = (_oct + 1) * 12 + semi
+                    _play_freq(_midi_freq(midi), _dur)
+                    played.append(NOTE_NAMES[semi])
+            if played:
+                print(" ".join(played))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _deinit_audio()
+        gc.collect()
+        _clear_screen()
 
 
 def demo(name=None):
@@ -427,12 +476,32 @@ def demo(name=None):
 
 
 def set_pin(pin):
-    """Set audio output pin."""
+    """Set I2S audio SD (data) output pin."""
     global _pin
     _pin = int(pin)
     _deinit_audio()
-    print("Audio pin:", _pin)
+    print("I2S pin:", _pin)
     return _pin
+
+
+def set_pwm_pin(pin):
+    """Set PWM buzzer output pin (PicoCalc built-in speaker)."""
+    global _pwm_pin
+    _pwm_pin = int(pin)
+    print("PWM pin:", _pwm_pin)
+    return _pwm_pin
+
+
+def use_pwm(enabled=True):
+    """Switch between PWM (built-in speaker) and I2S (external DAC) output.
+    use_pwm(True)  -> PWM mode (PicoCalc built-in speaker, pin 22)
+    use_pwm(False) -> I2S mode (external DAC, default)"""
+    global _use_pwm
+    _use_pwm = bool(enabled)
+    _deinit_audio()
+    mode = "PWM pin:{}".format(_pwm_pin) if _use_pwm else "I2S pin:{}".format(_pin)
+    print("Audio out:", mode)
+    return _use_pwm
 
 
 def close():
@@ -460,9 +529,13 @@ def help():
     print("volume(0-100) Set volume")
     print("bpm(30-300)   Set tempo")
     print("duration(ms)  Note length")
-    print("set_pin(n)    Audio output pin")
+    print("use_pwm(True) PWM speaker out")
+    print("set_pwm_pin(n) PWM pin (def 22)")
+    print("set_pin(n)    I2S SD pin (def 28)")
     print("close()       Release audio")
     print("tip: import synthesizer as sy")
+    print("tip: sy.use_pwm(True) for")
+    print("     PicoCalc built-in speaker")
 
 
 def h():
