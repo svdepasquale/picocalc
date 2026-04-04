@@ -8,6 +8,7 @@ MODULE_VERSION = "2026-03-28.3"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
+MAX_VARS = 50
 DEG_MODE = False
 
 _HISTORY = []
@@ -286,6 +287,9 @@ def store(name, value=None):
     key = str(name).strip()
     if key == "":
         print("Empty name.")
+        return False
+    if len(_VARS) >= MAX_VARS and key not in _VARS:
+        print("Var limit ({}).".format(MAX_VARS))
         return False
     _VARS[key] = value
     print("{}={}".format(key, value))

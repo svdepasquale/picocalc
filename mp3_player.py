@@ -449,6 +449,9 @@ def set_pin(pin):
     except Exception:
         print("Invalid pin.")
         return False
+    if val < 0 or val > 28:
+        print("Invalid pin (0-28).")
+        return False
     _AUDIO_PIN = val
     _deinit_audio()
     print("Audio pin:", _AUDIO_PIN)

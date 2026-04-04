@@ -1,5 +1,6 @@
 import time
 
+from pico_utils import clip as _clip_util
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
@@ -40,12 +41,7 @@ def _sta_wlan(active=False):
 
 
 def _clip(text, limit=DISPLAY_LINE_CHARS):
-    value = str(text)
-    if len(value) <= limit:
-        return value
-    if limit <= 3:
-        return value[:limit]
-    return value[: limit - 3] + "..."
+    return _clip_util(text, limit)
 
 
 def _clip_ssid(ssid):

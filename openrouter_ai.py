@@ -338,7 +338,10 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
     try:
         response = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload))
         status = response.status_code
-        body = response.json()
+        try:
+            body = response.json()
+        except Exception:
+            body = None
     except Exception as error:
         print("Request fail:", error)
         return None
@@ -358,6 +361,10 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
             print("Err:", _clip(err, 80))
         else:
             print("Bad response")
+        return None
+
+    if body is None:
+        print("Invalid JSON response")
         return None
 
     text = _extract_text(body)

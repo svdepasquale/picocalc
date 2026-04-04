@@ -482,7 +482,11 @@ def demo(name=None):
 def set_pin(pin):
     """Set I2S audio SD (data) output pin."""
     global _pin
-    _pin = int(pin)
+    val = int(pin)
+    if val < 0 or val > 28:
+        print("Invalid pin (0-28).")
+        return _pin
+    _pin = val
     _deinit_audio()
     print("I2S pin:", _pin)
     return _pin
@@ -491,7 +495,11 @@ def set_pin(pin):
 def set_pwm_pin(pin):
     """Set PWM buzzer output pin (PicoCalc built-in speaker)."""
     global _pwm_pin
-    _pwm_pin = int(pin)
+    val = int(pin)
+    if val < 0 or val > 28:
+        print("Invalid pin (0-28).")
+        return _pwm_pin
+    _pwm_pin = val
     print("PWM pin:", _pwm_pin)
     return _pwm_pin
 
