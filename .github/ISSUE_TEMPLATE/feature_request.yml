@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a new module, command, or enhancement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem this would solve
+      description: What is inconvenient, missing, or limiting today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to see happen? Keep in mind the 32-char display and memory constraints.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links, references.

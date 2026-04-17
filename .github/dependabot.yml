@@ -1,0 +1,14 @@
+# Picocalc runs MicroPython on-device; no package manager deps to track.
+# Dependabot only watches the GitHub Actions workflow for security advisories.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci"

@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a defect in one of the PicoCalc modules
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in the sections below.
+        For security vulnerabilities, please follow [SECURITY.md](../../SECURITY.md) instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing the bug.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      options:
+        - pico_utils
+        - wifi_manager
+        - openrouter_ai
+        - rss_news
+        - clock_ntp
+        - notes
+        - weather
+        - scientific_calc
+        - mp3_player
+        - synthesizer
+        - sys_status
+        - multiple / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: REPL commands or sequence that triggers the issue.
+      placeholder: |
+        1. import openrouter_ai as ai
+        2. ai.set_api_key('sk-or-...')
+        3. ai.ask('hello')
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Full traceback if available. Redact API keys and SSIDs.
+    validations:
+      required: true
+
+  - type: input
+    id: board
+    attributes:
+      label: Board and firmware
+      placeholder: "Pico 2W, MicroPython v1.24.0 on 2024-10-25 (rp2)"
+    validations:
+      required: true
+
+  - type: input
+    id: module-version
+    attributes:
+      label: MODULE_VERSION of the affected file
+      placeholder: "2026-03-28.2"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Free RAM, installed mip packages, anything else that might help.
