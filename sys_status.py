@@ -5,7 +5,7 @@ import time
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
 
 
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-06-06.1"
 PAGE_LINES = 8
 _BOOT_TICKS = ticks_ms()
 
@@ -108,7 +108,10 @@ def gc_run():
     before = gc.mem_free()
     gc.collect()
     after = gc.mem_free()
-    print("Freed:", format_bytes(after - before))
+    freed = after - before
+    if freed < 0:
+        freed = 0
+    print("Freed:", format_bytes(freed))
     print("Free now:", format_bytes(after))
     return after
 

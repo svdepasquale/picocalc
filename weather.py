@@ -7,7 +7,7 @@ from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-06-06.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -153,6 +153,11 @@ def set_city(name):
     match = results[0]
     lat = match.get("latitude")
     lon = match.get("longitude")
+    if lat is None or lon is None:
+        print("No coordinates for:", _clip(city, 18))
+        del data
+        gc.collect()
+        return False
     found_name = match.get("name", city)
     country = match.get("country", "")
     label = found_name
