@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.6"
+MODULE_VERSION = "2026-10-04.9"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -33,8 +33,10 @@ def _terminal():
 
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
+SCREEN_ROWS = 14
 try:
     _rows, _cols = _terminal().get_screen_size()
+    SCREEN_ROWS = _rows
     # one column short of the edge: the terminal wraps on the last column
     DISPLAY_WIDTH = _cols - 1
     # room for a header and the pager prompt
@@ -102,19 +104,21 @@ _FOLDS = {
 
 def to_cp437(text):
     # Map text to the codes the PicoCalc font draws (CP437); the rest -> ASCII.
+    # One replace() per distinct character: a loop over every character cost
+    # ~75 us each on the device, a quarter of what drawing it costs.
     if len(text) == len(text.encode()):
         return text
-    out = []
-    for ch in text:
-        if ord(ch) < 128:
-            out.append(ch)
-            continue
-        idx = _CP437_SRC.find(ch)
-        if idx >= 0:
-            out.append(_CP437_DST[idx])
-        else:
-            out.append(_FOLDS.get(ch, "?"))
-    return "".join(out)
+    table = {}
+    for ch in set(text):
+        if ord(ch) >= 128:
+            idx = _CP437_SRC.find(ch)
+            table[ch] = _CP437_DST[idx] if idx >= 0 else _FOLDS.get(ch, "?")
+    for code in table.values():
+        if code in table:  # an output is also an input: map one by one
+            return "".join(table.get(ch, ch) for ch in text)
+    for ch, code in table.items():
+        text = text.replace(ch, code)
+    return text
 
 
 try:
@@ -148,11 +152,26 @@ class _ScreenTerm(_IOBase):
 
     def readinto(self, buf):
         # The keyboard MCU answers EIO while the PicoCalc is off (Pico on USB
-        # power only); raising here would make dupterm detach the screen.
+        # power only), and a firmware bug can raise on Ctrl+U: raising here
+        # would make dupterm detach the screen.
         try:
             return self._term.readinto(buf)
-        except OSError:
+        except Exception:
             return None
+
+
+def _set_margins(term, keep_cursor=False):
+    # Firmware bug: scroll() moves the cursor one row past the bottom margin
+    # while it redraws the screen, and the cursor-blink interrupt can draw it
+    # there, past the end of the framebuffer: it zeroed bytes of the SD
+    # driver's buffer (the next heap block) and SD reads failed. A scroll
+    # region one row short keeps that row on screen. Never move the cursor
+    # to the last row: a line feed from there is the same overflow.
+    seq = "\x1b[1;{}r".format(SCREEN_ROWS - 1)  # DECSTBM homes the cursor
+    try:
+        term.wr("\x1b7" + seq + "\x1b8" if keep_cursor else seq)
+    except Exception:
+        pass
 
 
 def _install_screen():
@@ -163,10 +182,12 @@ def _install_screen():
     if prev is term or prev is None:
         # None: dupterm already detached the driver's terminal (a raw-paste
         # handshake from mpremote/Thonny writes bytes it can't decode)
+        _set_margins(term, True)
         return True
     if getattr(prev, "_cp437_screen", False):
         if prev._term is term:
             os.dupterm(prev)  # already wrapped
+        _set_margins(term, True)
         return True  # else: the old wrapper held a terminal boot.py replaced
     os.dupterm(prev)  # not the PicoCalc terminal: leave it alone
     return False
@@ -181,6 +202,26 @@ def ensure_screen():
 
 
 SCREEN_FIX = _install_screen()
+
+
+def _fix_screenshot():
+    # Ctrl+U saves the screen to /sd/screen_<ms>.bmp in the firmware, but its
+    # code reads display.buffer (never set) and memoryview.cast (MicroPython
+    # has none), so the key raised instead. Give it both.
+    try:
+        import array
+        import picocalc
+        import picocalcdisplay
+
+        display = picocalc.display
+        if not hasattr(display, "buffer"):
+            display.buffer = memoryview(display)
+        type(display).getLUT = lambda self: array.array("H", bytes(picocalcdisplay.getLUTview()))
+    except Exception:
+        pass
+
+
+_fix_screenshot()
 
 
 # ── look ────────────────────────────────────────
@@ -296,6 +337,9 @@ def wrap_text(text, width=DISPLAY_WIDTH):
 
 def clear_screen():
     print(RESET + "\x1b[2J\x1b[H", end="")
+    term = _terminal()
+    if term is not None and hasattr(term, "wr"):
+        _set_margins(term)  # straight to the PicoCalc, not to USB terminals
 
 
 def title_bar(title, status=True):
