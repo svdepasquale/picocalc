@@ -229,19 +229,25 @@ def _draw():
 
 def run():
     """Press a number to open an app; q (or Esc) leaves to the REPL."""
+    redraw = True
     while True:
-        _draw()
+        if redraw:
+            _draw()
+            redraw = False
         try:
             key = _read_key(REFRESH_MS)
         except KeyboardInterrupt:
             break
         if key is None:
+            # only the status line (row 4) changes: no full-screen flicker
+            print("\x1b[4;1H\x1b[K" + _status(), end="")
             continue
         if key in _BACK:
             break
         for app_key, _, app in _APPS:
             if key != app_key:
                 continue
+            redraw = True
             try:
                 app()
             except KeyboardInterrupt:
