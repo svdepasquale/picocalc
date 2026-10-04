@@ -26,14 +26,12 @@ See [CLAUDE.md](CLAUDE.md) for the full coding conventions.
 
 ## Local checks
 
-There is no test harness yet. Minimum verification:
+Minimum verification:
 
 ```bash
-# Syntax check with standard Python
-python3 -m py_compile module.py
-
-# Visual check for 32-char width
-awk 'length > 32 {print NR": "length" chars: "$0}' module.py
+# Host checks for parsers, formatters and helpers (CPython and MicroPython)
+python3 tests/test_logic.py
+micropython tests/test_logic.py   # brew install micropython
 ```
 
 On-device testing via serial REPL is the primary validation. Please note the Pico revision and MicroPython build in your PR description.

@@ -149,9 +149,15 @@ Display/throughput tuning:
 - `n.set_items_per_feed(2)` → items per feed fetch (range: 1..4)
 
 Default feeds in this version:
-- CNN
+- BBC World
 - ANSA
 - Al Jazeera
+
+The old CNN default no longer works (its HTTPS endpoint refuses the
+connection, the HTTP one has not been updated since 2023). Saved configs
+keep it: run `n.rm_feed('CNN')` or `n.reset_feeds()`.
+
+Each feed download stops after 26 KB, enough for the first items.
 
 RSS command list:
 - `import rss_news as n`
@@ -188,6 +194,9 @@ Order of use: connect Wi-Fi first, then sync time.
 5. `c.utc()` → show UTC time
 6. `c.epoch()` → raw epoch seconds
 
+After power-on the clock reads 2021-01-01 until `c.sync()`; `c.now()` and
+`c.date()` say so.
+
 Timezone:
 - `c.set_utc_offset(1)` → CET (Central European Time)
 - `c.set_utc_offset(2)` → CEST (summer) or EET
@@ -208,6 +217,8 @@ Full command list:
 
 ## Notes / Todo
 Persistent notes stored in `notes_data.json` on flash. Max 50 notes.
+Timestamps use local time (the `c.set_utc_offset()` value) and stay blank
+until the clock is set with `c.sync()`.
 
 - `import notes as t`
 - `t.add('Buy milk')` → quick add (title auto-generated)
@@ -297,6 +308,9 @@ Audio file player for WAV files via I2S output. Supports playlist management and
 Hardware setup:
 - I2S DAC required: SCK=GP16, WS=GP17, SD=GP28
 - Change SD pin: `mp.set_pin(26)`
+- On the PicoCalc GP16/GP17 are the SD card pins and the built-in
+  speakers are PWM-only, so this player produces no sound there and
+  breaks `/sd` until reset.
 
 Quick start:
 1. Copy `.wav` files to Pico flash (or SD card if available)
@@ -341,22 +355,22 @@ Notes:
 4. Run other commands after Wi-Fi is connected.
 
 ## Synthesizer
-Software tone/note synthesizer. Supports I2S output (external DAC) and PWM output (built-in PicoCalc speaker/buzzer).
+Software tone/note synthesizer. Supports PWM output (built-in PicoCalc speakers) and I2S output (external DAC).
 
 Audio output modes:
-- **I2S mode** (default): uses SCK=GP16, WS=GP17, SD=GP28 (external DAC); produces sine/square/saw/triangle waveforms
-- **PWM mode** (built-in PicoCalc speaker): uses GPIO pin 22 by default; produces square waves; enable with `sy.use_pwm(True)`
+- **PWM mode** (default): drives the PicoCalc speakers on GP26 (L) and GP27 (R); produces square waves
+- **I2S mode**: uses SCK=GP16, WS=GP17, SD=GP28 (external DAC); produces sine/square/saw/triangle waveforms; enable with `sy.use_pwm(False)`. On the PicoCalc GP16/GP17 are the SD card pins, so I2S breaks `/sd` until reset.
 
-Quick start (PicoCalc built-in speaker):
+Quick start (PicoCalc built-in speakers):
 1. `import synthesizer as sy`
-2. `sy.use_pwm(True)` → switch to PWM output
-3. `sy.tone(440, 500)` → play 440 Hz for 500 ms
-4. `sy.piano()` → interactive keyboard mode
+2. `sy.tone(440, 500)` → play 440 Hz for 500 ms
+3. `sy.piano()` → interactive keyboard mode
 
 Quick start (external I2S DAC):
 1. Connect DAC: SCK→GP16, WS→GP17, SD→GP28
 2. `import synthesizer as sy`
-3. `sy.piano()` → interactive keyboard mode
+3. `sy.use_pwm(False)` → switch to I2S output
+4. `sy.piano()` → interactive keyboard mode
 
 Commands:
 - `import synthesizer as sy`
@@ -370,9 +384,9 @@ Commands:
 - `sy.volume(70)` → set volume (0..100)
 - `sy.bpm(120)` → set tempo
 - `sy.duration(200)` → set note duration in ms
-- `sy.use_pwm(True)` → use PWM output (built-in speaker, pin 22)
+- `sy.use_pwm(True)` → use PWM output (built-in speakers, default)
 - `sy.use_pwm(False)` → use I2S output (external DAC)
-- `sy.set_pwm_pin(22)` → change PWM output pin
+- `sy.set_pwm_pin(26, 27)` → change PWM output pin(s)
 - `sy.set_pin(28)` → change I2S SD pin
 - `sy.close()` → release audio hardware
 - `sy.ver()` / `sy.help()` / `sy.h()`
@@ -387,18 +401,16 @@ Piano keyboard layout:
 Controls: +/- octave, 1-4 waveform, r redraw, q quit
 
 Troubleshooting:
-- No sound from PicoCalc speaker: run `sy.use_pwm(True)` then `sy.tone(440, 300)`
-- If wrong pin: run `sy.set_pwm_pin(n)` with correct pin number
+- No sound from PicoCalc speakers: run `sy.use_pwm(True)` then `sy.tone(440, 300)`
+- If wrong pin: run `sy.set_pwm_pin(n)` with the correct pin number(s)
 - PWM produces square waves only; for other waveforms use I2S mode with external DAC
 - Ctrl+C exits piano mode cleanly and clears the screen
 
-## Remove old startup files on PicoCalc
-Run in REPL:
-- `import os`
-- `print(os.listdir())`
-- `os.remove('main.py')`   # ignore error if missing
-- `os.remove('boot.py')`   # ignore error if missing
-- `print(os.listdir())`
+## Startup files on PicoCalc
+Do **not** delete `boot.py`: on the official PicoCalc MicroPython firmware
+it is the file that starts the screen, keyboard, SD card (`/sd`) and
+speakers. Without it the device only has a REPL over USB.
+`main.py` is empty on that firmware; this toolkit does not need one.
 
 ## Troubleshooting
 - If disconnected after startup: run `w.acs()`, then `w.st()`.
@@ -409,13 +421,13 @@ Run in REPL:
 - If AI says `No API key.`: run `ai.set_api_key('sk-or-v1-...')`.
 - If OpenRouter returns HTTP error: verify key/model and internet access.
 - If RSS says `Missing urequests.`: run `import mip; mip.install('urequests')`.
-- If RSS returns no items: try `n.latest('CNN')` to test one source only.
+- If RSS returns no items: try `n.latest(1)` to test one source only.
 - If feed fails repeatedly: remove and re-add URL (`n.rm_feed(...)`, `n.add_feed(...)`).
 - If NTP sync fails: check Wi-Fi connection, retry `c.sync()`.
 - If ntptime missing: run `import mip; mip.install('ntptime')`.
 - If weather shows wrong location: run `m.set_city('Rome')` or `m.set_location(lat, lon, 'name')`.
-- If synthesizer makes no sound: run `sy.use_pwm(True)` then `sy.tone(440, 300)` (built-in speaker mode).
-- If PWM pin is wrong for your hardware: run `sy.set_pwm_pin(n)` with the correct GPIO pin number.
+- If synthesizer makes no sound: run `sy.use_pwm(True)` then `sy.tone(440, 300)` (built-in speakers).
+- If the speakers stay silent: try `sy.set_pwm_pin(28, 27)` (some official ClockworkPi sources put the left channel on GP28).
 - Old interactive UI stays on screen after exit: this is fixed in version 2026-03-28.3 (clear on exit).
 
 ## Known limitations
@@ -441,14 +453,4 @@ import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
-- `pico_utils`: `2026-03-28.2`
-- `wifi_manager`: `2026-03-28.2`
-- `openrouter_ai`: `2026-03-28.3`
-- `rss_news`: `2026-03-28.2`
-- `sys_status`: `2026-03-28.2`
-- `clock_ntp`: `2026-03-28.2`
-- `notes`: `2026-03-28.2`
-- `weather`: `2026-03-28.2`
-- `scientific_calc`: `2026-03-28.3`
-- `mp3_player`: `2026-03-28.2`
-- `synthesizer`: `2026-03-28.3`
+All modules: `2026-10-04.1` (check on device with `<module>.ver()`).
