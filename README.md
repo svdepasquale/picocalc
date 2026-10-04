@@ -491,6 +491,7 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - If weather shows wrong location: run `m.set_city('Rome')` or `m.set_location(lat, lon, 'name')`.
 - If synthesizer makes no sound: run `sy.use_pwm(True)` then `sy.tone(440, 300)` (built-in speakers).
 - If the speakers stay silent: try `sy.set_pwm_pin(28, 27)` (some official ClockworkPi sources put the left channel on GP28).
+- If screen and keyboard stop responding after Thonny or `mpremote` connected (or with the PicoCalc switched off): the firmware's terminal detached itself. `import go` from USB, or a reset, brings it back; once the toolkit is loaded it no longer happens.
 - Old interactive UI stays on screen after exit: this is fixed in version 2026-03-28.3 (clear on exit).
 
 ## Known limitations
