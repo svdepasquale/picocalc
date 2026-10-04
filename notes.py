@@ -8,13 +8,14 @@ from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json
 from pico_utils import screen_header as _screen_header
 from pico_utils import local_time as _local_time, clock_synced as _clock_synced
+from pico_utils import DISPLAY_WIDTH
 
 
 DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 
 _NOTES = None
 
@@ -130,6 +131,7 @@ def _render_note_summary(note, pos, total):
     _preview_print(_clip(note.get("t", "?"), MAX_TITLE_CHARS), max_lines=2)
     print("---")
     _preview_print(_clip(note.get("b", ""), 180), max_lines=4)
+    print("x: toggle done")
 
 
 def _render_note_detail(note, pos, total):
@@ -155,7 +157,7 @@ def ls():
     lines = []
     for i, note in enumerate(notes, 1):
         mark = "[x]" if note.get("done") else "[ ]"
-        title = _clip(note.get("t", "?"), 22)
+        title = _clip(note.get("t", "?"), DISPLAY_WIDTH - 10)
         lines.append("{} {} {}".format(i, mark, title))
     _paged_lines(lines)
     return len(notes)
@@ -280,7 +282,14 @@ def view(index=1):
     if not notes:
         print("No notes.")
         return None
-    return _browse_items("Notes", notes, index, _render_note_summary, _render_note_detail)
+    return _browse_items(
+        "Notes", notes, index, _render_note_summary, _render_note_detail, _note_key
+    )
+
+
+def _note_key(key, note, pos):
+    if key == "x":
+        (undone if note.get("done") else done)(pos + 1)
 
 
 def ver():
