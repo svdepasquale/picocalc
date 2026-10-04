@@ -2,13 +2,13 @@
 
 ## What this project is
 
-A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2W). It provides Wi-Fi management, AI chat (OpenRouter), RSS news, clock/NTP, notes/todo, weather, scientific calculator, MP3 player, and synthesizer — all optimized for a 320x320 display with a tiny keyboard.
+A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2W), meant to be used standalone with the device's keyboard and screen: a launcher (`menu.py`, opened by `main.py`) plus Wi-Fi management, AI chat (OpenRouter or a local server), RSS/Miniflux news, clock/NTP, notes/todo, weather, scientific calculator, WAV player, synthesizer and system status.
 
 ## Target hardware
 
 - **Board:** Raspberry Pi Pico 2W (RP2350, wireless). The kit ships with a Pico H (RP2040); this toolkit targets the 2W.
 - **Enclosure:** PicoCalc v2.0 mainboard (keyboard MCU, SD slot, 2 speakers + 3.5 mm jack, 8 MB PSRAM that the stock `RPI_PICO2_W` MicroPython build does not enable)
-- **Display:** 4" IPS 320x320 (ILI9488, SPI1); usable area ~32 characters wide, ~8 lines per page
+- **Display:** 4" IPS 320x320 (ILI9488, SPI1). `pico_utils` reads the terminal size: 52 usable columns and 34-line pages on the official firmware, a 32x8 fallback elsewhere (host tests)
 - **Audio:** Built-in speakers on PWM GP26 (L) + GP27 (R), the pins the official `boot.py` uses (other ClockworkPi sources put L on GP28). GP22 is the SD card-detect line, not audio. An external I2S DAC (SCK=GP16, WS=GP17, SD=GP28) collides with the SD card, which sits on SPI0 GP16-19.
 - **RAM:** RP2350 has 520 KB SRAM; the MicroPython heap is what `gc.mem_free()` reports, minus the official driver's ~50 KB framebuffer (320x320 at 4 bpp). Memory is still a hard constraint
 
@@ -18,7 +18,9 @@ ClockworkPi ships MicroPython built on [PicoCalc-micropython-driver](https://git
 
 - `boot.py` (on the filesystem) starts display, keyboard, SD (`/sd`) and speakers, then `os.dupterm()`s the screen terminal. Never delete it.
 - The terminal is 53x40 characters (6x8 font). It draws each character as the CP437 glyph of its code: no Unicode, so `à` shows as `α`.
-- Arrow keys reach stdin as VT100 sequences (`\x1b[A`...), which `input()`'s line editor consumes (history/cursor).
+- Its `vt.write()` returns characters, not bytes: on non-ASCII output MicroPython re-sends the UTF-8 tail, `decode()` raises, and dupterm detaches screen and keyboard until reset. `pico_utils` installs `_ScreenTerm` over it at import (reports bytes, never raises, maps to CP437). Do not print around it.
+- Arrow keys reach stdin as VT100 sequences (`\x1b[A`...), which `input()`'s line editor consumes (history/cursor). The terminal's `readinto()` never blocks and it has no `ioctl`, so `select` can't see device keys: `pico_utils.read_key()` polls it directly.
+- Ctrl+C from the device keyboard only acts while something reads stdin: long loops must call `poll_key()` and stop on `q`/Esc.
 - Battery: I2C reg 0x0B of the keyboard MCU (address 0x1F) returns 2 bytes; byte 1 = percent, bit 7 = charging. The official C example waits 16 ms between the register write and the read; the driver's `picocalc.keyboard.battery()` does not.
 
 ## MicroPython constraints
@@ -53,7 +55,9 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 | `scientific_calc.py` | Trig, log, conversions, history | No | No |
 | `mp3_player.py` | WAV audio player via I2S | No | Yes (I2S DAC) |
 | `synthesizer.py` | Tone/note synthesizer (PWM or I2S) | No | Yes (speaker/DAC) |
-| `sys_status.py` | RAM, flash, uptime, IP, CPU | No | No |
+| `sys_status.py` | RAM, flash, uptime, IP, CPU, battery | No | Yes (keyboard MCU) |
+| `menu.py` | Launcher, one key per app | No | No |
+| `main.py` | Opens the launcher at boot | No | No |
 
 ## Coding conventions
 
@@ -61,7 +65,8 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 - **Short aliases:** Every module exposes short aliases for REPL use (e.g., `view()` → `v()`, `latest()` → `l()`). Always define both.
 - **Module version:** Each file has a `MODULE_VERSION` constant (or variant like `WIFI_MANAGER_VERSION`). Format: `"YYYY-MM-DD.N"` (e.g., `"2026-03-28.2"`).
 - **Standard methods:** Every module must implement `ver()`, `help()`, and `h()` (short alias for help).
-- **Display constants:** `DISPLAY_WIDTH = 32`, `PAGE_LINES = 8`. All output must fit within 32 chars to avoid wrapping on the PicoCalc screen.
+- **Display constants:** import `DISPLAY_WIDTH` and `PAGE_LINES` from `pico_utils` (detected at import); never redefine them locally. Output must fit `DISPLAY_WIDTH`.
+- **Keys:** navigation uses `pico_utils.read_key()` / `poll_key()` / `wait_key()` (single keys, arrows as `"up"`...); `input()` only for free text; `read_line(mask="*")` for secrets.
 - **Section headers in code:** Use `# ──` divider comments to separate logical sections.
 - **Import pattern for utils:** `from pico_utils import func as _func` (underscore prefix to keep module namespace clean).
 - **ujson fallback:** Always use `try: import ujson as json / except: import json`.
@@ -81,11 +86,12 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 These files are stored on the Pico's flash filesystem, not in the repo:
 
 - `/wifi_credentials.json` — saved Wi-Fi networks
-- `/openrouter_config.json` — AI key, model, system prompt
+- `/openrouter_config.json` — AI key, model, system prompt, endpoint, stream flag
 - `/rss_feeds.json` — RSS feed list + display settings
-- `/clock_config.json` — UTC offset
+- `/clock_config.json` — UTC offset, EU DST flag
 - `/notes_data.json` — saved notes/todo items
 - `/weather_config.json` — location (lat, lon, name)
+- `/miniflux_config.json` — Miniflux URL + API key (optional)
 
 ## Testing
 
@@ -97,4 +103,4 @@ To verify changes:
 
 ## Build and deploy
 
-No build step. Copy all `.py` files to the Pico root via USB (Thonny, `mpremote`, or MicroPico VS Code extension). The device runs files directly from flash.
+No build step. Copy the root `.py` files (not `tests/`) to the Pico root via USB (Thonny, `mpremote cp *.py :`, or MicroPico VS Code extension). `main.py` replaces the firmware's empty one and opens the launcher. The device runs files directly from flash.
