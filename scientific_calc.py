@@ -2,10 +2,10 @@ import gc
 import math
 
 from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen, screen_header
+from pico_utils import DISPLAY_WIDTH
 
 
-MODULE_VERSION = "2026-10-04.1"
-DISPLAY_WIDTH = 32
+MODULE_VERSION = "2026-10-04.2"
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
 MAX_VARS = 50
@@ -53,6 +53,14 @@ def _format_result(value, width=DISPLAY_WIDTH - 2):
     if isinstance(value, int):
         return _fit_int(value, width)
     return clip(str(value), width)
+
+
+def _prepare_expr(expr):
+    # Like a desk calculator: "+5" or "*2" continues from the last result.
+    # A leading "-" stays a negative number.
+    if _LAST is not None and expr[:1] in ("+", "*", "/", "%"):
+        return "ans" + expr
+    return expr
 
 
 def _print_result(expr, result):
@@ -384,6 +392,7 @@ def clear_history():
 def calc():
     screen_header("Calculator")
     print("expr h=help q/empty=exit")
+    print("+5 or *2 continues from ans")
     print("Mode:", "deg" if DEG_MODE else "rad")
     print("")
     try:
@@ -408,6 +417,7 @@ def calc():
                 continue
 
             try:
+                expr = _prepare_expr(expr)
                 namespace = _calc_namespace()
                 result = eval(expr, {"__builtins__": {}}, namespace)
                 _print_result(expr, result)
