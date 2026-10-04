@@ -15,7 +15,7 @@ from pico_utils import (
 )
 
 
-MODULE_VERSION = "2026-03-28.3"
+MODULE_VERSION = "2026-10-04.1"
 
 # ── audio ───────────────────────────────────────
 SAMPLE_RATE = 22050
@@ -24,9 +24,11 @@ BUF_SZ = CHUNK * 2
 TBL_LEN = 256
 
 # ── state ───────────────────────────────────────
-_pin = 28        # I2S SD (data) pin
-_pwm_pin = 22    # PWM buzzer pin (PicoCalc built-in speaker)
-_use_pwm = False # True = use PWM output instead of I2S
+_pin = 28              # I2S SD (data) pin
+_pwm_pins = (26, 27)   # PicoCalc speakers L/R (official boot.py)
+# PWM by default: I2S needs an external DAC, and its default SCK/WS
+# (GP16/17) are the PicoCalc SD card pins
+_use_pwm = True
 _vol = 70
 _wave = "sine"
 _oct = 4
@@ -162,6 +164,7 @@ def _play_freq_i2s(freq, dur_ms):
     rel = max(1, min(110, total // 4))
 
     buf = bytearray(BUF_SZ)
+    mv = memoryview(buf)
     tbl = _tbl
     is_sine = _wave == "sine"
     is_sq = _wave == "square"
@@ -201,9 +204,11 @@ def _play_freq_i2s(freq, dur_ms):
                 off = i << 1
                 buf[off] = smp & 0xFF
                 buf[off + 1] = (smp >> 8) & 0xFF
-                phase = (phase + phase_inc) & 0xFFFFFFFF
+                # only bits 16-23 index the table; 24 bits keep phase a
+                # small int (a 32-bit mask allocated a long int per sample)
+                phase = (phase + phase_inc) & 0xFFFFFF
 
-            audio.write(buf[:n << 1])
+            audio.write(mv[:n << 1])
             written += n
     except KeyboardInterrupt:
         pass
@@ -212,21 +217,26 @@ def _play_freq_i2s(freq, dur_ms):
 
 
 def _play_freq_pwm(freq, dur_ms):
-    """Play a square-wave tone via PWM (PicoCalc built-in speaker)."""
+    """Play a square-wave tone via PWM (PicoCalc built-in speakers)."""
     try:
         from machine import PWM, Pin
-        pwm = PWM(Pin(_pwm_pin))
+        pwms = [PWM(Pin(p)) for p in _pwm_pins]
         hz = max(20, min(20000, int(freq)))
-        pwm.freq(hz)
         duty = max(0, min(65535, int(32768 * _vol // 100)))
-        pwm.duty_u16(duty)
+        # GP26/27 share one PWM slice: set the frequency before any duty
+        for pwm in pwms:
+            pwm.freq(hz)
+        for pwm in pwms:
+            pwm.duty_u16(duty)
         try:
             _sleep_ms(int(dur_ms))
         except KeyboardInterrupt:
             pass
         finally:
-            pwm.duty_u16(0)
-            pwm.deinit()
+            for pwm in pwms:
+                pwm.duty_u16(0)
+            for pwm in pwms:
+                pwm.deinit()
         return True
     except ImportError:
         print("No machine module (not MicroPython?).")
@@ -492,26 +502,34 @@ def set_pin(pin):
     return _pin
 
 
-def set_pwm_pin(pin):
-    """Set PWM buzzer output pin (PicoCalc built-in speaker)."""
-    global _pwm_pin
-    val = int(pin)
-    if val < 0 or val > 28:
-        print("Invalid pin (0-28).")
-        return _pwm_pin
-    _pwm_pin = val
-    print("PWM pin:", _pwm_pin)
-    return _pwm_pin
+def _pins_label():
+    return ",".join(str(p) for p in _pwm_pins)
+
+
+def set_pwm_pin(*pins):
+    """Set PWM speaker pin(s): set_pwm_pin(26, 27) or set_pwm_pin(28)."""
+    global _pwm_pins
+    if not pins:
+        print("PWM pins:", _pins_label())
+        return _pwm_pins
+    vals = tuple(int(p) for p in pins)
+    for val in vals:
+        if val < 0 or val > 28:
+            print("Invalid pin (0-28).")
+            return _pwm_pins
+    _pwm_pins = vals
+    print("PWM pins:", _pins_label())
+    return _pwm_pins
 
 
 def use_pwm(enabled=True):
-    """Switch between PWM (built-in speaker) and I2S (external DAC) output.
-    use_pwm(True)  -> PWM mode (PicoCalc built-in speaker, pin 22)
-    use_pwm(False) -> I2S mode (external DAC, default)"""
+    """Switch between PWM (built-in speakers) and I2S (external DAC) output.
+    use_pwm(True)  -> PWM mode (PicoCalc speakers, GP26/27, default)
+    use_pwm(False) -> I2S mode (external DAC; SCK/WS = SD card pins)"""
     global _use_pwm
     _use_pwm = bool(enabled)
     _deinit_audio()
-    mode = "PWM pin:{}".format(_pwm_pin) if _use_pwm else "I2S pin:{}".format(_pin)
+    mode = "PWM pins:{}".format(_pins_label()) if _use_pwm else "I2S pin:{}".format(_pin)
     print("Audio out:", mode)
     return _use_pwm
 
@@ -541,13 +559,13 @@ def help():
     print("volume(0-100) Set volume")
     print("bpm(30-300)   Set tempo")
     print("duration(ms)  Note length")
-    print("use_pwm(True) PWM speaker out")
-    print("set_pwm_pin(n) PWM pin (def 22)")
+    print("use_pwm(b)    PWM/I2S (def PWM)")
+    print("set_pwm_pin(n..) def 26,27")
     print("set_pin(n)    I2S SD pin (def 28)")
     print("close()       Release audio")
     print("tip: import synthesizer as sy")
-    print("tip: sy.use_pwm(True) for")
-    print("     PicoCalc built-in speaker")
+    print("tip: I2S needs a DAC and uses")
+    print("     GP16/17 = SD card pins")
 
 
 def h():
