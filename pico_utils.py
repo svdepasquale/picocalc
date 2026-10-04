@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.9"
+MODULE_VERSION = "2026-10-04.10"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -265,7 +265,8 @@ def refresh_status():
 
 
 def status_text():
-    # "12:34  WiFi  87%": time once the clock is set, Wi-Fi, battery. Offset,
+    # "12:34  WiFi  Bat 87%": time once the clock is set, Wi-Fi, battery ("+"
+    # while charging). Offset,
     # Wi-Fi and battery (16 ms + I2C) are re-read every STATUS_TTL_MS only:
     # viewers draw the title bar on every key.
     now = ticks_ms()
@@ -281,7 +282,7 @@ def status_text():
     if _STATUS[2]:
         parts.append("WiFi")
     if _STATUS[3] is not None:
-        parts.append("{}%{}".format(_STATUS[3][0], "+" if _STATUS[3][1] else ""))
+        parts.append("Bat {}%{}".format(_STATUS[3][0], "+" if _STATUS[3][1] else ""))
     return "  ".join(parts)
 
 
