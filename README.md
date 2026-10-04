@@ -43,8 +43,11 @@ Type `import go` at the REPL (it works again after leaving the menu):
 6 Calculator   7 Synth piano   8 Clock   9 System   q REPL
 ```
 
-- each app has its own one-key sub-menu; `q`/Esc goes back
-- the status line shows time, battery and Wi-Fi
+- a number opens an app; ↑/↓ and Enter work too
+- each app has its own one-key sub-menu (keys shown in yellow); `q`/Esc goes back
+- the title bar shows time, Wi-Fi and battery; some apps show a hint
+  (Wi-Fi state, AI model, weather city, open notes)
+- at start it joins a saved Wi-Fi network (`q` skips) and sets the clock
 - `q` leaves to the REPL; `import go` reopens it
 
 The official ClockworkPi firmware freezes its own `boot.py` and `main.py`
@@ -66,6 +69,12 @@ writer with one that reports bytes and maps accented letters to their
 CP437 glyphs (letters CP437 lacks, like `È`, become plain ASCII). This
 covers everything printed, the REPL included.
 
+## Look
+Colours (the terminal's 16-colour palette), a title bar with time, Wi-Fi
+and battery, bars for RAM/flash/battery, a big block-digit clock and a
+progress bar for the countdown. `s.colors()` (System → `c`) shows the
+palette.
+
 ## Keys
 Menus, viewers and pagers react to single keys, no Enter:
 - viewers (`ai.view()`, `n.view()`, `t.view()`, `mp.browse()`):
@@ -75,7 +84,9 @@ Menus, viewers and pagers react to single keys, no Enter:
 - long-running loops (countdown, melodies, playback) stop with `q`/Esc:
   Ctrl+C from the PicoCalc keyboard only acts while the program reads input
 - free text (chat questions, notes, calculator) still uses a normal input
-  line ending with Enter
+  line ending with Enter; prompts that need it say "Enter"
+- System → `k` (or `s.keys()`) shows the raw bytes and name of each key and
+  logs them to `/keylog.txt`: use it if a key does nothing
 
 ## PicoCalc commands
 - `import wifi_manager as w`
@@ -105,6 +116,8 @@ Order of use:
 6. Ask a question:
 	- `ai.ask('Explain DNS in simple words')`
 
+Default model: `anthropic/claude-sonnet-5.5` on OpenRouter ($2 / $10 per
+million input / output tokens: about 0.3 cents per short answer).
 Replies stream in as they are generated, word-wrapped to the screen.
 A question already sent can't be cancelled from the keyboard.
 Prompt and response size limits reduce memory pressure.
@@ -227,6 +240,9 @@ once without retrying. Long articles are fetched one at a time.
 - `s.uptime()` → time since boot
 - `s.ip()` → current IP, gateway, DNS
 - `s.bat()` → battery percent and charging state (PicoCalc keyboard MCU)
+- `s.info()` → dashboard with bars (RAM, flash, battery), uptime, IP, CPU
+- `s.keys()` → key test, logs to `/keylog.txt`
+- `s.colors()` → the 16 colours of the palette
 - `s.freq()` → CPU frequency
 - `s.ls()` / `s.ls('/lib')` → list files with sizes
 - `s.gc_run()` → force garbage collect and show freed bytes
@@ -265,7 +281,10 @@ Countdown:
 - `q`/Esc cancels
 
 Live clock:
-- `c.live()` → date and time updating every second; any key returns
+- `c.live()` → big block-digit clock updating every second; any key returns
+
+In the launcher, Clock → `z` sets the zone with one key: `1` Italy/CET
+(UTC+1 with EU summer time), `2` UK, `3` UTC, `4` any other offset.
 
 Full command list:
 - `c.ver()` / `c.help()` / `c.h()`

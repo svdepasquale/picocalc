@@ -70,7 +70,9 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 - **Module version:** Each file has a `MODULE_VERSION` constant (or variant like `WIFI_MANAGER_VERSION`). Format: `"YYYY-MM-DD.N"` (e.g., `"2026-03-28.2"`).
 - **Standard methods:** Every module must implement `ver()`, `help()`, and `h()` (short alias for help).
 - **Display constants:** import `DISPLAY_WIDTH` and `PAGE_LINES` from `pico_utils` (detected at import); never redefine them locally. Output must fit `DISPLAY_WIDTH`.
-- **Keys:** navigation uses `pico_utils.read_key()` / `poll_key()` / `wait_key()` (single keys, arrows as `"up"`...); `input()` only for free text; `read_line(mask="*")` for secrets.
+- **Keys:** navigation uses `pico_utils.read_key()` / `poll_key()` / `wait_key()` (single keys, arrows as `"up"`...); `input()` only for free text; `read_line(mask="*")` for secrets; any `read_line` prompt says "Enter".
+- **Look:** decoration only through `pico_utils.paint()` / `title_bar()` / `key_bar()` / `bar()` (16-colour palette via `38;5;n`, every span resets). Never colour text that `wrap_text` measures or that tests compare: wrap first, paint after (`preview_print(fg=...)`). Box/block/arrow glyphs map to CP437 in the screen writer.
+- **Terminal lookup:** `pico_utils._terminal()` reads `picocalc.terminal` at each use (boot.py rebuilds it); `ensure_screen()` re-attaches the writer.
 - **Section headers in code:** Use `# ──` divider comments to separate logical sections.
 - **Import pattern for utils:** `from pico_utils import func as _func` (underscore prefix to keep module namespace clean).
 - **ujson fallback:** Always use `try: import ujson as json / except: import json`.
