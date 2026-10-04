@@ -7,26 +7,36 @@ from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import http_request as _http_request, wrap_text as _wrap_text
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header
 
 
 CONFIG_FILE = "rss_feeds.json"
-MAX_XML_CHARS = 26000
+MAX_XML_BYTES = 26000
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-10-04.1"
 
 DEFAULT_FEEDS = [
-    {"name": "CNN", "url": "https://rss.cnn.com/rss/edition.rss"},
+    {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
     {"name": "ANSA", "url": "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml"},
     {"name": "Al Jazeera", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
 ]
 
 _LAST_ITEMS = []
+_TYPO_ENTITIES = (
+    ("&hellip;", "..."),
+    ("&lsquo;", "'"),
+    ("&rsquo;", "'"),
+    ("&ldquo;", '"'),
+    ("&rdquo;", '"'),
+    ("&ndash;", "-"),
+    ("&mdash;", "-"),
+)
 
 
 def _resolve_cached_item(index):
@@ -95,6 +105,8 @@ def _decode_entities(text):
     value = value.replace("&quot;", '"')
     value = value.replace("&apos;", "'")
     value = value.replace("&nbsp;", " ")
+    for entity, repl in _TYPO_ENTITIES:
+        value = value.replace(entity, repl)
     if "&#" in value:
         out = []
         i = 0
@@ -129,10 +141,17 @@ def _strip_tags(text):
         if lt < 0:
             out.append(source[pos:])
             break
+        nxt = source[lt + 1 : lt + 2]
+        if not (nxt.isalpha() or nxt in ("/", "!", "?")):
+            # a bare "<" in text (e.g. "a < b") is not a tag
+            out.append(source[pos : lt + 1])
+            pos = lt + 1
+            continue
         if lt > pos:
             out.append(source[pos:lt])
         gt = source.find(">", lt)
         if gt < 0:
+            out.append(source[lt:])  # unterminated: text, not a tag
             break
         pos = gt + 1
     return "".join(out)
@@ -148,6 +167,9 @@ def _clean_text(text, limit=MAX_SUMMARY_CHARS):
     value = value.replace("\n", " ").replace("\r", " ").replace("\t", " ")
     value = _strip_tags(value)
     value = _decode_entities(value)
+    if "<" in value:
+        # entity-escaped HTML (Atom type="html", many RSS descriptions)
+        value = _strip_tags(value)
     value = " ".join(value.split())
 
     if limit and len(value) > limit:
@@ -467,18 +489,40 @@ def set_items_per_feed(count):
     return value
 
 
+def _read_body(response, limit):
+    # Read at most `limit` bytes from the socket: response.text would buffer
+    # the whole feed (130 KB for some) before it could be truncated.
+    buf = bytearray(limit)
+    view = memoryview(buf)
+    got = 0
+    while got < limit:
+        n = response.raw.readinto(view[got:])
+        if not n:
+            break
+        got += n
+    for cut in range(4):  # the cap can split a UTF-8 sequence
+        try:
+            return str(view[: max(0, got - cut)], "utf-8")
+        except Exception:
+            pass
+    for i in range(got):  # not UTF-8 at all: keep the ASCII part
+        if buf[i] > 127:
+            buf[i] = 63
+    return str(view[:got], "utf-8")
+
+
 def _fetch_feed(name, url, per_feed, requests):
     print("RSS>", _clip(name, 24))
     response = None
     start = _ticks_ms()
 
     try:
-        response = requests.get(url)
+        response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
             print("HTTP:", status)
             return []
-        xml_text = response.text
+        xml_text = _read_body(response, MAX_XML_BYTES)
     except Exception as error:
         print("Fetch err:", _clip(error, 24))
         return []
@@ -493,8 +537,6 @@ def _fetch_feed(name, url, per_feed, requests):
         print("Empty feed.")
         return []
 
-    if len(xml_text) > MAX_XML_CHARS:
-        xml_text = xml_text[:MAX_XML_CHARS]
     parsed = _parse_feed(xml_text, per_feed)
     elapsed = _ticks_diff(_ticks_ms(), start)
     print("ok", len(parsed), "ms", elapsed)
@@ -567,20 +609,23 @@ def latest(feed=None, per_feed=None):
         print("No news.")
         return 0
 
-    print("---")
+    # one paged list: per-item paging let the first items scroll off screen
+    lines = []
     for index, item in enumerate(collected, start=1):
         title = _clip(item.get("title", "(no title)"), MAX_TITLE_CHARS)
         summary = _clip(item.get("summary", ""), preview_chars)
         source = _clip(item.get("source", "?"), 18)
-        print("[{}] {}".format(index, source))
-        _paged_print(title)
+        lines.append("[{}] {}".format(index, source))
+        lines.extend(_wrap_text(title))
         if summary:
-            _paged_print("- " + summary)
+            lines.extend(_wrap_text("- " + summary))
         else:
-            print("- (no preview)")
-        print("")
+            lines.append("- (no preview)")
+        lines.append("")
+    lines.append("Tip: view(1) browse / read(1)")
 
-    print("Tip: view(1) browse / read(1)")
+    print("---")
+    _paged_lines(lines)
     return len(collected)
 
 
