@@ -11,15 +11,23 @@ from pico_utils import http_request as _http_request, wrap_text as _wrap_text
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header
 
+try:
+    import ujson as json
+except ImportError:
+    import json
+
 
 CONFIG_FILE = "rss_feeds.json"
+MF_CONFIG_FILE = "miniflux_config.json"
+MF_LIMIT = 3
+MF_MAX_BYTES = 49152
 MAX_XML_BYTES = 26000
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -489,9 +497,9 @@ def set_items_per_feed(count):
     return value
 
 
-def _read_body(response, limit):
-    # Read at most `limit` bytes from the socket: response.text would buffer
-    # the whole feed (130 KB for some) before it could be truncated.
+def _read_capped(response, limit):
+    # At most `limit` bytes straight from the socket: response.text would
+    # buffer the whole body (130 KB for some feeds) before truncating.
     buf = bytearray(limit)
     view = memoryview(buf)
     got = 0
@@ -500,6 +508,11 @@ def _read_body(response, limit):
         if not n:
             break
         got += n
+    return buf, got
+
+
+def _decode_text(buf, got):
+    view = memoryview(buf)
     for cut in range(4):  # the cap can split a UTF-8 sequence
         try:
             return str(view[: max(0, got - cut)], "utf-8")
@@ -509,6 +522,11 @@ def _read_body(response, limit):
         if buf[i] > 127:
             buf[i] = 63
     return str(view[:got], "utf-8")
+
+
+def _read_body(response, limit):
+    buf, got = _read_capped(response, limit)
+    return _decode_text(buf, got)
 
 
 def _fetch_feed(name, url, per_feed, requests):
@@ -550,7 +568,7 @@ def _fetch_feed(name, url, per_feed, requests):
     return parsed
 
 
-def latest(feed=None, per_feed=None):
+def latest(feed=None, per_feed=None, show=True):
     global _LAST_ITEMS
 
     config = _ensure_config(persist=False)
@@ -608,6 +626,8 @@ def latest(feed=None, per_feed=None):
     if not collected:
         print("No news.")
         return 0
+    if not show:
+        return len(collected)
 
     # one paged list: per-item paging let the first items scroll off screen
     lines = []
@@ -658,6 +678,179 @@ def view(index=1):
     )
 
 
+# ── Miniflux ────────────────────────────────────
+# Unread entries from a Miniflux server, shown in the same viewer.
+
+
+def mf_setup(url, token):
+    """mf_setup('https://feed.example.com', 'API-KEY'): use a dedicated key."""
+    base = _normalize_url(url).rstrip("/")
+    key = str(token).strip()
+    if base == "" or key == "":
+        print("Need http(s) URL and API key.")
+        return False
+    if not save_json(MF_CONFIG_FILE, {"url": base, "token": key}):
+        return False
+    print("Miniflux:", _clip(base, 40))
+    return True
+
+
+def _mf_config():
+    data = load_json(MF_CONFIG_FILE)
+    if isinstance(data, dict) and data.get("url") and data.get("token"):
+        return data
+    print("No Miniflux. Use mf_setup(url, key)")
+    return None
+
+
+def _mf_items(data):
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return None
+    items = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        feed = entry.get("feed")
+        source = feed.get("title", "") if isinstance(feed, dict) else ""
+        content = str(entry.get("content") or "")
+        items.append(
+            {
+                "title": _clean_text(entry.get("title", ""), MAX_TITLE_CHARS),
+                "summary": _clean_text(content[:6000], MAX_SUMMARY_CHARS),
+                "link": str(entry.get("url", "")),
+                "date": str(entry.get("published_at", ""))[:16].replace("T", " "),
+                "source": _clean_text(source or "Miniflux", 28),
+                "mf_id": entry.get("id"),
+            }
+        )
+    return items
+
+
+def _mf_fetch(config, requests, limit):
+    # (status, parsed JSON); data None when the body exceeded MF_MAX_BYTES
+    url = "{}/v1/entries?status=unread&order=published_at&direction=desc&limit={}".format(
+        config["url"], limit
+    )
+    response = None
+    try:
+        response = _http_request(
+            requests, "GET", url, headers={"X-Auth-Token": config["token"]}
+        )
+        status = response.status_code
+        if status != 200:
+            return status, None
+        buf, got = _read_capped(response, MF_MAX_BYTES)
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+    if got >= MF_MAX_BYTES:
+        return status, None
+    view = memoryview(buf)[:got]
+    try:
+        data = json.loads(view)
+    except TypeError:  # CPython wants bytes
+        data = json.loads(bytes(view))
+    del view, buf
+    gc.collect()
+    return status, data
+
+
+def mf(limit=MF_LIMIT):
+    """Fetch unread Miniflux entries (newest first), then view()/read()."""
+    global _LAST_ITEMS
+    config = _mf_config()
+    if config is None:
+        return 0
+    if not check_wifi():
+        return 0
+    requests = _http_module()
+    if requests is None:
+        return 0
+    try:
+        limit = max(1, min(10, int(limit)))
+    except Exception:
+        limit = MF_LIMIT
+
+    print("Miniflux> unread")
+    while True:
+        try:
+            status, data = _mf_fetch(config, requests, limit)
+        except Exception as error:
+            print("Fetch err:", _clip(error, 24))
+            return 0
+        if status == 401:
+            print("Miniflux: bad API key (not retrying).")
+            return 0
+        if status != 200:
+            print("HTTP:", status)
+            return 0
+        if data is None and limit > 1:
+            limit = 1  # long articles: one entry fits where three did not
+            print("Large entries, fetching 1")
+            continue
+        break
+    if data is None:
+        print("Entry too large.")
+        return 0
+
+    items = _mf_items(data)
+    total = data.get("total", 0) if isinstance(data, dict) else 0
+    del data
+    gc.collect()
+    if not items:
+        print("No unread entries.")
+        _LAST_ITEMS = []
+        return 0
+    _LAST_ITEMS = items
+    print("Unread: {} (showing {})".format(total, len(items)))
+    print("Tip: view(1), then mf_done()")
+    return len(items)
+
+
+def mf_done():
+    """Mark the entries fetched by mf() as read on the server."""
+    ids = [item["mf_id"] for item in _LAST_ITEMS if item.get("mf_id")]
+    if not ids:
+        print("No Miniflux entries loaded.")
+        return False
+    config = _mf_config()
+    if config is None or not check_wifi():
+        return False
+    requests = _http_module()
+    if requests is None:
+        return False
+    response = None
+    try:
+        response = _http_request(
+            requests,
+            "PUT",
+            config["url"] + "/v1/entries",
+            headers={"X-Auth-Token": config["token"], "Content-Type": "application/json"},
+            data=json.dumps({"entry_ids": ids, "status": "read"}),
+        )
+        status = response.status_code
+    except Exception as error:
+        print("Err:", _clip(error, 24))
+        return False
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+    if status not in (200, 204):
+        print("HTTP:", status)
+        return False
+    for item in _LAST_ITEMS:
+        item.pop("mf_id", None)
+    print("Marked read:", len(ids))
+    return True
+
+
 def add_feed_prompt():
     try:
         name = input("Feed name: ").strip()
@@ -700,6 +893,9 @@ def help():
     print("set_preview(n)  Preview chars")
     print("set_items_per_feed(n)  Per feed")
     print("setup()       Show settings")
+    print("mf()          Miniflux unread")
+    print("mf_done()     Mark them read")
+    print("mf_setup(u,k) Miniflux server")
     print("tip: import rss_news as n")
 
 

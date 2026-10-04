@@ -25,6 +25,7 @@ rss_feeds.json
 clock_config.json
 notes_data.json
 weather_config.json
+miniflux_config.json
 *.json.tmp
 *.json.bak
 
