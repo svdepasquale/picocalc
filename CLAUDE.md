@@ -14,9 +14,11 @@ A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2
 
 ## Official firmware facts
 
-ClockworkPi ships MicroPython built on [PicoCalc-micropython-driver](https://github.com/zenodante/PicoCalc-micropython-driver):
+ClockworkPi ships MicroPython built on [PicoCalc-micropython-driver](https://github.com/zenodante/PicoCalc-micropython-driver). The latest `micropython_pico2w.uf2` (2025-10-30) is MicroPython 1.27.0-preview:
 
-- `boot.py` (on the filesystem) starts display, keyboard, SD (`/sd`) and speakers, then `os.dupterm()`s the screen terminal. Never delete it.
+- `boot.py` starts display, keyboard, SD (`/sd`) and speakers, then `os.dupterm()`s the screen terminal. The 2025-10-30 build freezes `boot.py` and `main.py` in the firmware; older driver builds keep them on flash (never delete `boot.py` there).
+- MicroPython runs a frozen `main.py` before one on flash (`shared/runtime/pyexec.c`, `pyexec_file_if_exists`), so the toolkit's `main.py` can only run on firmwares without a frozen one (inferred from that code, not tried); `import go` opens the launcher everywhere.
+- With the Pico on USB power only (PicoCalc switched off), the keyboard MCU answers I2C reads with `EIO`; the driver raises it from `vt.readinto()` and dupterm detaches the screen. `_ScreenTerm.readinto()` swallows it.
 - The terminal is 53x40 characters (6x8 font). It draws each character as the CP437 glyph of its code: no Unicode, so `à` shows as `α`.
 - Its `vt.write()` returns characters, not bytes: on non-ASCII output MicroPython re-sends the UTF-8 tail, `decode()` raises, and dupterm detaches screen and keyboard until reset. `pico_utils` installs `_ScreenTerm` over it at import (reports bytes, never raises, maps to CP437). Do not print around it.
 - Arrow keys reach stdin as VT100 sequences (`\x1b[A`...), which `input()`'s line editor consumes (history/cursor). The terminal's `readinto()` never blocks and it has no `ioctl`, so `select` can't see device keys: `pico_utils.read_key()` polls it directly.
@@ -57,7 +59,8 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 | `synthesizer.py` | Tone/note synthesizer (PWM or I2S) | No | Yes (speaker/DAC) |
 | `sys_status.py` | RAM, flash, uptime, IP, CPU, battery | No | Yes (keyboard MCU) |
 | `menu.py` | Launcher, one key per app | No | No |
-| `main.py` | Opens the launcher at boot | No | No |
+| `go.py` | `import go` opens the launcher | No | No |
+| `main.py` | Opens the launcher at boot (firmwares without a frozen `main.py`) | No | No |
 
 ## Coding conventions
 
@@ -103,4 +106,4 @@ To verify changes:
 
 ## Build and deploy
 
-No build step. Copy the root `.py` files (not `tests/`) to the Pico root via USB (Thonny, `mpremote cp *.py :`, or MicroPico VS Code extension). `main.py` replaces the firmware's empty one and opens the launcher. The device runs files directly from flash.
+No build step. Copy the root `.py` files (not `tests/`) to the Pico root via USB (Thonny, `mpremote cp *.py :`, or MicroPico VS Code extension), with the PicoCalc switched on. With the PicoCalc off, `mpremote`'s default soft reset re-runs `boot.py`, whose terminal then raises `EIO` into the raw-REPL handshake: switch it on, or skip the reset with `mpremote resume ...`. The tests also run on the device: `mpremote resume run tests/test_logic.py`.

@@ -2,14 +2,15 @@
 
 Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Synthesizer + System toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
 
-- `main.py` opens a launcher menu at boot: one key per app, `q` to the REPL
+- a launcher menu (`import go`): one key per app, `q` to the REPL
 - single-key navigation (no Enter) in menus, viewers and pagers; arrows work
 - on the official PicoCalc firmware the toolkit uses the whole 53x40 screen
   and shows accented text correctly (see "Screen" below)
 - every module still works from the REPL with short aliases
 
 ## Files
-- `main.py` → opens the launcher at boot
+- `go.py` → `import go` opens the launcher
+- `main.py` → opens the launcher at boot where the firmware has no frozen `main.py`
 - `menu.py` → launcher: one key per app
 - `pico_utils.py` → shared display/keys/IO utilities (used by other modules)
 - `wifi_manager.py` → connect logic + interactive setup
@@ -35,8 +36,7 @@ Data files created automatically:
 - `/miniflux_config.json` → Miniflux URL + API key (optional)
 
 ## Launcher (standalone use)
-`main.py` opens the menu after the firmware's `boot.py` has set up the
-screen and keyboard:
+Type `import go` at the REPL (it works again after leaving the menu):
 
 ```
 1 WiFi   2 AI chat   3 News   4 Weather   5 Notes
@@ -45,8 +45,13 @@ screen and keyboard:
 
 - each app has its own one-key sub-menu; `q`/Esc goes back
 - the status line shows time, battery and Wi-Fi
-- `q` leaves to the REPL; `import menu; menu.run()` reopens it
-- delete `main.py` to boot into a plain REPL
+- `q` leaves to the REPL; `import go` reopens it
+
+The official ClockworkPi firmware freezes its own `boot.py` and `main.py`
+inside the firmware, and MicroPython runs a frozen `main.py` before any
+`main.py` on flash, so the toolkit's `main.py` never runs there. On a
+firmware without a frozen `main.py` the one on flash should run and open
+the launcher (that follows from MicroPython's `pyexec.c`; not tried).
 
 ## Screen
 On the official PicoCalc firmware `pico_utils` reads the terminal size
@@ -403,9 +408,10 @@ Notes:
 
 ## First-time setup
 1. Upload the `.py` files of the repo root to the Pico root (not `tests/`),
-   e.g. `mpremote cp *.py :`. This replaces the firmware's empty `main.py`.
-2. Reset: the launcher opens. Press `1`, then `c` to pick a Wi-Fi network;
-   the clock is set from NTP once connected.
+   e.g. `mpremote cp *.py :` (with the PicoCalc switched on: on USB power
+   alone its keyboard controller is off and answers I2C errors).
+2. `import go` opens the launcher. Press `1`, then `c` to pick a Wi-Fi
+   network; the clock is set from NTP once connected.
 3. `8` (Clock) → `z`: UTC offset `1` and `y` for EU summer time (Italy).
 
 ## Synthesizer
@@ -464,11 +470,10 @@ Troubleshooting:
 - `q`/Esc exits piano mode and clears the screen
 
 ## Startup files on PicoCalc
-Do **not** delete `boot.py`: on the official PicoCalc MicroPython firmware
-it is the file that starts the screen, keyboard, SD card (`/sd`) and
-speakers. Without it the device only has a REPL over USB.
-On that firmware `main.py` is empty; this toolkit's `main.py` replaces it
-to open the launcher, and deleting it brings back the plain REPL.
+`boot.py` starts the screen, keyboard, SD card (`/sd`) and speakers. The
+official ClockworkPi firmware (2025-10-30 build) keeps it frozen inside the
+firmware; older driver builds keep it on flash. If yours is on flash, do
+**not** delete it: without it the device only has a REPL over USB.
 
 ## Troubleshooting
 - If disconnected after startup: run `w.acs()`, then `w.st()`.
