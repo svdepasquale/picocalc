@@ -11,6 +11,7 @@ from pico_utils import http_request as _http_request
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
 from pico_utils import DISPLAY_WIDTH
+from pico_utils import paint as _paint, GREY, BCYAN, BYELLOW
 
 try:
     import ujson as json
@@ -20,7 +21,7 @@ except ImportError:
 
 CONFIG_FILE = "openrouter_config.json"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+DEFAULT_MODEL = "anthropic/claude-sonnet-5.5"
 DEFAULT_SYSTEM_PROMPT = (
     "Reply concise, in plain text: no markdown, tables or emoji."
     " It is read on a small handheld screen."
@@ -30,7 +31,7 @@ MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
 # per read: a non-streamed reply sends nothing until generation ends
 AI_TIMEOUT = 60
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -506,7 +507,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
     if api_key:
         headers["Authorization"] = "Bearer " + api_key
 
-    print("AI>", selected_model)
+    print(_paint(selected_model.split("/")[-1] + " ...", GREY))
     start_ms = _ticks_ms()
 
     response = None
@@ -533,7 +534,6 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
                 print("Bad response")
             return None
         if stream:
-            print("---")
             printer = _StreamPrinter()
             text = _sse_text(response.raw, printer)
             printer.close()
@@ -549,7 +549,6 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
             del body
             if text is not None:
                 text = _clip(text, MAX_OUTPUT_CHARS)
-                print("---")
                 _paged_print(text)
     except Exception as error:
         print("Request fail:", error)
@@ -566,8 +565,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         return None
 
     elapsed_ms = _ticks_diff(_ticks_ms(), start_ms)
-    print("---")
-    print("ms:", elapsed_ms)
+    print(_paint("{} ms".format(elapsed_ms), GREY))
 
     _response_append(prompt_text, text, selected_model, elapsed_ms)
 
@@ -580,14 +578,14 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
 
 def chat(with_view=False):
-    _screen_header("AI Chat")
-    print("q or empty line to exit")
-    print("A sent question can't be cancelled.")
+    _screen_header("AI chat")
+    print(_paint("Type a question, Enter sends. Empty line or q exits.", GREY))
+    print(_paint("A sent question can't be cancelled.", GREY))
     print("")
     try:
         while True:
             try:
-                prompt = input("Q> ").strip()
+                prompt = input(_paint("> ", BCYAN)).strip()
             except Exception:
                 prompt = ""
 
