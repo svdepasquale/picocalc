@@ -27,7 +27,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -500,6 +500,7 @@ def set_items_per_feed(count):
 def _read_capped(response, limit):
     # At most `limit` bytes straight from the socket: response.text would
     # buffer the whole body (130 KB for some feeds) before truncating.
+    gc.collect()  # one contiguous block: compact the heap first
     buf = bytearray(limit)
     view = memoryview(buf)
     got = 0
