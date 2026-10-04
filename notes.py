@@ -9,13 +9,14 @@ from pico_utils import load_json, save_json
 from pico_utils import screen_header as _screen_header
 from pico_utils import local_time as _local_time, clock_synced as _clock_synced
 from pico_utils import DISPLAY_WIDTH
+from pico_utils import paint as _paint, BGREEN, BYELLOW, BWHITE, GREY
 
 
 DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 
 _NOTES = None
 
@@ -123,15 +124,14 @@ def _resolve_note(index):
 
 
 def _render_note_summary(note, pos, total):
-    state = "DONE" if note.get("done") else "OPEN"
-    print("[{}/{}] {}".format(pos + 1, total, state))
-    if note.get("ts"):
-        print(note["ts"])
-    print("Title:")
-    _preview_print(_clip(note.get("t", "?"), MAX_TITLE_CHARS), max_lines=2)
-    print("---")
+    state = _paint("DONE", BGREEN) if note.get("done") else _paint("OPEN", BYELLOW)
+    print(state + "  " + _paint(note.get("ts", ""), GREY))
+    print("")
+    _preview_print(_clip(note.get("t", "?"), MAX_TITLE_CHARS), max_lines=2, fg=BWHITE)
+    print("")
     _preview_print(_clip(note.get("b", ""), 180), max_lines=4)
-    print("x: toggle done")
+    print("")
+    print(_paint("x", BYELLOW) + " toggle done")
 
 
 def _render_note_detail(note, pos, total):

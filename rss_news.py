@@ -10,6 +10,7 @@ from pico_utils import load_json, save_json, http_module as _http_module, check_
 from pico_utils import http_request as _http_request, wrap_text as _wrap_text
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header
+from pico_utils import paint as _paint, BCYAN, BWHITE, GREY
 
 try:
     import ujson as json
@@ -60,12 +61,10 @@ def _resolve_cached_item(index):
 
 
 def _render_news_summary(item, pos, total, preview_chars=DEFAULT_PREVIEW_CHARS):
-    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18)))
-    if item.get("date"):
-        _preview_print(_clip(item.get("date"), 80), max_lines=1)
-    print("Title:")
-    _preview_print(_clip(item.get("title", "(no title)"), MAX_TITLE_CHARS), max_lines=3)
-    print("---")
+    print(_paint(_clip(item.get("source", "?"), 18), BCYAN) + "  " + _paint(_clip(item.get("date", ""), 30), GREY))
+    print("")
+    _preview_print(_clip(item.get("title", "(no title)"), MAX_TITLE_CHARS), max_lines=3, fg=BWHITE)
+    print("")
     preview = _clip(item.get("summary", ""), preview_chars)
     if preview:
         _preview_print(preview, max_lines=4)

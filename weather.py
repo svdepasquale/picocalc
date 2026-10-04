@@ -4,11 +4,13 @@ import time
 from pico_utils import clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 from pico_utils import http_request as _http_request
+from pico_utils import paint as _paint, GREY, BWHITE, BBLUE, BCYAN, BGREEN, BYELLOW, BRED
+from pico_utils import BMAGENTA, WHITE
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -56,6 +58,40 @@ def _load_config():
 
 def _save_config(config):
     return save_json(CONFIG_FILE, config)
+
+
+def _temp_color(value):
+    try:
+        t = float(value)
+    except Exception:
+        return WHITE
+    if t <= 0:
+        return BBLUE
+    if t <= 10:
+        return BCYAN
+    if t <= 20:
+        return BGREEN
+    if t <= 28:
+        return BYELLOW
+    return BRED
+
+
+def _sky_color(code):
+    if code in (0, 1):
+        return BYELLOW  # clear
+    if code in (2, 3):
+        return WHITE  # clouds
+    if code in (45, 48):
+        return GREY  # fog
+    if code in (71, 73, 75, 77, 85, 86):
+        return BWHITE  # snow
+    if code in (95, 96, 99):
+        return BMAGENTA  # storms
+    return BCYAN  # drizzle, rain, showers
+
+
+def _temp(value):
+    return _paint("{}\u00b0C".format(value), _temp_color(value))
 
 
 def _get_location():
@@ -203,7 +239,7 @@ def now():
         API_URL, lat, lon
     )
 
-    print("Weather>", label)
+    print(_paint("updating...", GREY))
     response = None
     start = _ticks_ms()
 
@@ -240,16 +276,12 @@ def now():
     desc = WMO_CODES.get(code, "Code:{}".format(code))
     elapsed = _ticks_diff(_ticks_ms(), start)
 
-    print("---")
-    print("Location:", label)
+    print(_paint(label, BWHITE) + "  " + _paint(desc, _sky_color(code)))
     if not name:
         print("Tip: set_location(lat,lon,'CityName')")
-    print(desc)
-    print("Temp: {}C".format(temp))
-    print("Wind: {} km/h {}deg".format(wind, wdir))
+    print("Now {}   wind {} km/h {}\u00b0".format(_temp(temp), wind, wdir))
     if wtime:
-        print("At:", _clip(wtime, 20))
-    print("ms:", elapsed)
+        print(_paint("at " + _clip(wtime, 20).replace("T", " ") + "  " + str(elapsed) + " ms", GREY))
 
     result = {"temp": temp, "wind": wind, "wind_dir": wdir, "desc": desc, "time": wtime}
     gc.collect()
@@ -277,7 +309,7 @@ def forecast(days=3):
         "&timezone=auto&forecast_days={}"
     ).format(API_URL, lat, lon, num_days)
 
-    print("Forecast>", label, "({}d)".format(num_days))
+    print(_paint("next {} days".format(num_days), GREY))
     response = None
     start = _ticks_ms()
 
@@ -312,8 +344,6 @@ def forecast(days=3):
 
     elapsed = _ticks_diff(_ticks_ms(), start)
 
-    print("---")
-    print("Location:", label)
     if not name:
         print("Tip: set_location(lat,lon,'CityName')")
     forecast_data = []
@@ -324,11 +354,9 @@ def forecast(days=3):
         lo = tmin[i] if i < len(tmin) else "?"
         c = codes[i] if i < len(codes) else -1
         desc = WMO_CODES.get(c, "?")
-        print("{} {}".format(short_d, desc))
-        print("  {}..{}C".format(lo, hi))
+        print("{}  {} .. {}  {}".format(short_d, _temp(lo), _temp(hi), _paint(desc, _sky_color(c))))
         forecast_data.append({"date": d, "min": lo, "max": hi, "desc": desc})
 
-    print("ms:", elapsed)
     gc.collect()
     return forecast_data
 
