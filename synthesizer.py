@@ -2,20 +2,20 @@
 
 import gc
 import math
-import time
 from array import array
 
 from pico_utils import (
     clip as _clip,
     clear_screen as _clear_screen,
     screen_header as _screen_header,
-    safe_input as _safe_input,
     sleep_ms as _sleep_ms,
+    read_key as _read_key,
+    poll_key as _poll_key,
     DISPLAY_WIDTH,
 )
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 
 # ── audio ───────────────────────────────────────
 SAMPLE_RATE = 22050
@@ -371,19 +371,27 @@ def duration(ms=None):
     return _dur
 
 
+def _stop_requested():
+    # Ctrl+C from the device keyboard only acts while stdin is read
+    return _poll_key() in ("q", "Q", "esc")
+
+
 def seq(pattern, ms=None):
     """Play note sequence (space-separated).
     seq('C D E F G A B C5')
-    Use - or r for rests."""
+    Use - or r for rests. q/Esc stops."""
     if ms is None:
         ms = _dur
     tokens = str(pattern).strip().split()
     if not tokens:
         print("Empty pattern.")
         return False
-    print("Seq: {} notes".format(len(tokens)))
+    print("Seq: {} notes (q/Esc stops)".format(len(tokens)))
     try:
         for tk in tokens:
+            if _stop_requested():
+                print("Stopped.")
+                return False
             midi = _parse_note(tk)
             if midi is None:
                 continue
@@ -398,8 +406,107 @@ def seq(pattern, ms=None):
     return True
 
 
+_RTTTL_NOTES = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11, "h": 11}
+
+
+def _rtttl_parse(song):
+    """'name:d=4,o=5,b=63:8e6,p,4c#.5' -> [(hz, ms), ...]; hz 0 = rest."""
+    parts = str(song).split(":")
+    if len(parts) != 3:
+        return None
+    length, octv, tempo = 4, 6, 63  # RTTTL defaults
+    for item in parts[1].split(","):
+        kv = item.strip().lower().split("=")
+        if len(kv) != 2:
+            continue
+        try:
+            val = int(kv[1])
+        except ValueError:
+            continue
+        if kv[0] == "d":
+            length = val
+        elif kv[0] == "o":
+            octv = val
+        elif kv[0] == "b":
+            tempo = val
+    whole = 240000 // max(tempo, 1)  # ms per whole note (4 beats)
+    out = []
+    for tok in parts[2].split(","):
+        tok = tok.strip().lower()
+        i = 0
+        num = ""
+        while i < len(tok) and tok[i].isdigit():
+            num += tok[i]
+            i += 1
+        if i >= len(tok):
+            continue
+        name = tok[i]
+        i += 1
+        sharp = 0
+        if i < len(tok) and tok[i] == "#":
+            sharp = 1
+            i += 1
+        dotted = False
+        if i < len(tok) and tok[i] == ".":
+            dotted = True
+            i += 1
+        octave_digits = ""
+        while i < len(tok) and tok[i].isdigit():
+            octave_digits += tok[i]
+            i += 1
+        if i < len(tok) and tok[i] == ".":
+            dotted = True
+        note_len = int(num) if num else length
+        if note_len <= 0:
+            continue
+        ms = whole // note_len
+        if dotted:
+            ms += ms // 2
+        if name == "p":
+            out.append((0, ms))
+            continue
+        if name not in _RTTTL_NOTES:
+            continue
+        note_oct = int(octave_digits) if octave_digits else octv
+        midi = (note_oct + 1) * 12 + _RTTTL_NOTES[name] + sharp
+        out.append((_midi_freq(midi), ms))
+    return out
+
+
+def rtttl(song):
+    """Play an RTTTL ringtone ('name:d=4,o=5,b=100:8e6,...'). q/Esc stops."""
+    notes = _rtttl_parse(song)
+    if not notes:
+        print("Bad RTTTL.")
+        return False
+    print("RTTTL: {} ({} notes, q/Esc stops)".format(_clip(song.split(":")[0], 20), len(notes)))
+    try:
+        for hz, ms in notes:
+            if _stop_requested():
+                print("Stopped.")
+                return False
+            if hz:
+                _play_freq(hz, ms * 9 // 10)
+                _sleep_ms(ms - ms * 9 // 10)
+            else:
+                _sleep_ms(ms)
+    except KeyboardInterrupt:
+        print("Stopped.")
+        return False
+    return True
+
+
+def beep(times=1, hz=880, ms=120):
+    """Short beeps without console output (timers, alerts)."""
+    for i in range(times):
+        _play_freq(hz, ms)
+        if i < times - 1:
+            _sleep_ms(ms)
+    return True
+
+
 def piano():
-    """Interactive piano keyboard."""
+    """Interactive piano: each key plays at once, no Enter."""
     def _show_piano():
         _screen_header("~~ Synthesizer ~~")
         out = "PWM" if _use_pwm else "I2S"
@@ -414,41 +521,31 @@ def piano():
             print("Out:{} +/-oct (waves: I2S only)".format(out))
         else:
             print("Out:{} +/-oct 1-4wave".format(out))
-        print("q=quit r=redraw")
+        print("q/Esc=quit r=redraw")
 
     _show_piano()
     try:
         while True:
-            try:
-                raw = _safe_input("> ").strip().lower()
-            except Exception:
-                raw = ""
-
-            if raw == "" or raw == "q":
+            key = _read_key()
+            if key in (None, "q", "Q", "esc", "eof"):
                 break
-
-            if raw == "+":
+            if len(key) == 1:
+                key = key.lower()
+            if key == "+":
+                print()
                 octave(min(_oct + 1, 8))
-                continue
-            if raw == "-":
+            elif key == "-":
+                print()
                 octave(max(_oct - 1, 0))
-                continue
-            if raw in ("1", "2", "3", "4"):
-                wave(WAVES[int(raw) - 1])
-                continue
-            if raw == "r":
+            elif key in ("1", "2", "3", "4"):
+                print()
+                wave(WAVES[int(key) - 1])
+            elif key == "r":
                 _show_piano()
-                continue
-
-            played = []
-            for ch in raw:
-                if ch in _KEYS:
-                    semi = _KEYS[ch]
-                    midi = (_oct + 1) * 12 + semi
-                    _play_freq(_midi_freq(midi), _dur)
-                    played.append(NOTE_NAMES[semi])
-            if played:
-                print(" ".join(played))
+            elif key in _KEYS:
+                semi = _KEYS[key]
+                print(NOTE_NAMES[semi], end=" ")
+                _play_freq(_midi_freq((_oct + 1) * 12 + semi), _dur)
     except KeyboardInterrupt:
         pass
     finally:
@@ -457,36 +554,47 @@ def piano():
         _clear_screen()
 
 
+_DEMOS = {
+    "scale": "C D E F G A B C5",
+    "twinkle": (
+        "C C G G A A G - "
+        "F F E E D D C - "
+        "G G F F E E D - "
+        "G G F F E E D - "
+        "C C G G A A G - "
+        "F F E E D D C"
+    ),
+    "ode": (
+        "E E F G G F E D "
+        "C C D E E D D - "
+        "E E F G G F E D "
+        "C C D E D C C"
+    ),
+    # RTTTL: Tarrega's Gran Vals (the Nokia tune) and Beethoven's Fur Elise
+    "nokia": "Nokia:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a",
+    "elise": (
+        "Elise:d=8,o=5,b=125:32p,e6,d#6,e6,d#6,e6,b,d6,c6,4a.,32p,c,e,a,"
+        "4b.,32p,e,g#,b,4c.6,32p,e,e6,d#6,e6,d#6,e6,b,d6,c6,4a.,32p,c,e,a,"
+        "4b.,32p,d,c6,b,2a"
+    ),
+}
+
+
 def demo(name=None):
     """Play a demo melody."""
-    songs = {
-        "scale": "C D E F G A B C5",
-        "twinkle": (
-            "C C G G A A G - "
-            "F F E E D D C - "
-            "G G F F E E D - "
-            "G G F F E E D - "
-            "C C G G A A G - "
-            "F F E E D D C"
-        ),
-        "ode": (
-            "E E F G G F E D "
-            "C C D E E D D - "
-            "E E F G G F E D "
-            "C C D E D C C"
-        ),
-    }
     if name is None:
-        print("Demos:", ", ".join(songs.keys()))
+        print("Demos:", ", ".join(_DEMOS.keys()))
         return
     name = str(name).strip().lower()
-    if name not in songs:
+    if name not in _DEMOS:
         print("Unknown:", name)
-        print("Options:", ", ".join(songs.keys()))
+        print("Options:", ", ".join(_DEMOS.keys()))
         return
     print("Demo:", name)
-    ms = 60000 // max(_bpm, 30)
-    seq(songs[name], ms)
+    song = _DEMOS[name]
+    if ":" in song:
+        return rtttl(song)
+    return seq(song, 60000 // max(_bpm, 30))
 
 
 def set_pin(pin):
@@ -552,7 +660,9 @@ def help():
     print("note(n,ms)    Play note (C4,A#5)")
     print("seq(notes)    Play sequence")
     print("demo(name)    Play demo melody")
-    print("  scale, twinkle, ode")
+    print("  scale twinkle ode nokia elise")
+    print("rtttl(song)   Play RTTTL ringtone")
+    print("beep(n)       Short beeps")
     print("wave(type)    Set waveform")
     print("  sine square saw triangle")
     print("octave(0-8)   Set octave")
