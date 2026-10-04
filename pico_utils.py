@@ -12,7 +12,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-04.4"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -145,7 +145,9 @@ def _install_screen():
     if _TERM is None or not hasattr(os, "dupterm") or not hasattr(_TERM, "wr"):
         return False
     prev = os.dupterm(_ScreenTerm(_TERM))
-    if prev is _TERM:
+    if prev is _TERM or prev is None:
+        # None: dupterm already detached the driver's terminal (a raw-paste
+        # handshake from mpremote/Thonny writes bytes it can't decode)
         return True
     os.dupterm(prev)  # already wrapped, or not the PicoCalc terminal
     return getattr(prev, "_cp437_screen", False)
