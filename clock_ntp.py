@@ -6,9 +6,11 @@ from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _loc
 from pico_utils import clock_synced as _clock_synced
 from pico_utils import poll_key as _poll_key, read_key as _read_key, sleep_ms as _sleep_ms
 from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
+from pico_utils import paint as _paint, bar as _bar, DISPLAY_WIDTH
+from pico_utils import BCYAN, BYELLOW, GREY, GREEN
 
 
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 NTP_HOST = "pool.ntp.org"
 NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
@@ -199,48 +201,88 @@ def countdown(secs):
     if total < 1 or total > 86400:
         print("Range: 1..86400")
         return False
-    print("Countdown: {}s (q/Esc stops)".format(total))
+    print("Countdown {}  ".format(_fmt_secs(total)) + _paint("q", BYELLOW) + " stop")
     deadline = _ticks_add(_ticks_ms(), total * 1000)
     shown = None
+    width = max(10, DISPLAY_WIDTH - 12)
     try:
         while True:
             left_ms = _ticks_diff(deadline, _ticks_ms())
             if left_ms <= 0:
                 break
             left = (left_ms + 999) // 1000
-            if left != shown and (left == total or left % 10 == 0 or left <= 5):
-                print("  {}m {:02d}s".format(left // 60, left % 60))
+            if left != shown:
                 shown = left
+                done = (total - left) / total
+                print("\r\x1b[K" + _bar(done, width, GREEN) + " " + _fmt_secs(left), end="")
             if _poll_key() in ("q", "Q", "esc"):
+                print()
                 print("Cancelled.")
                 return False
             _sleep_ms(100)
     except KeyboardInterrupt:
+        print()
         print("Cancelled.")
         return False
-    print("TIME!")
+    print("\r\x1b[K" + _bar(1, width, GREEN) + " " + _fmt_secs(0))
+    print(_paint("TIME!", BYELLOW))
     _beep()
     return True
+
+
+def _fmt_secs(secs):
+    if secs >= 3600:
+        return "{}:{:02d}:{:02d}".format(secs // 3600, secs // 60 % 60, secs % 60)
+    return "{}:{:02d}".format(secs // 60, secs % 60)
+
+
+# 3x5 digits, drawn two characters wide with full blocks
+_BIG = {
+    "0": ("###", "# #", "# #", "# #", "###"),
+    "1": ("  #", "  #", "  #", "  #", "  #"),
+    "2": ("###", "  #", "###", "#  ", "###"),
+    "3": ("###", "  #", "###", "  #", "###"),
+    "4": ("# #", "# #", "###", "  #", "  #"),
+    "5": ("###", "#  ", "###", "  #", "###"),
+    "6": ("###", "#  ", "###", "# #", "###"),
+    "7": ("###", "  #", "  #", "  #", "  #"),
+    "8": ("###", "# #", "###", "# #", "###"),
+    "9": ("###", "# #", "###", "  #", "###"),
+    ":": (" ", "#", " ", "#", " "),
+}
+
+
+def big_lines(text):
+    """Text of digits and ':' as 5 lines of block characters."""
+    rows = []
+    for r in range(5):
+        parts = []
+        for ch in text:
+            glyph = _BIG.get(ch)
+            if glyph:
+                parts.append(glyph[r].replace("#", "\u2588\u2588").replace(" ", "  "))
+        rows.append(" ".join(parts))
+    return rows
 
 
 def live():
     """Big clock that updates every second; any key returns."""
     _screen_header("Clock")
-    print("")
-    print("")
-    print("any key: back")
+    days = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     last = None
     try:
         while True:
             lt, offset = _local_time()
             if lt[5] != last:
                 last = lt[5]
-                days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
                 label = "UTC" + ("{:+d}".format(offset) if offset else "")
-                # rows 4-5, under the header
-                print("\x1b[4;1H\x1b[K{} {:04d}-{:02d}-{:02d}".format(
-                    days[lt[6] % 7], lt[0], lt[1], lt[2]))
-                print("\x1b[K{} {}".format(_fmt_short(lt), label), end="")
+                print("\x1b[3;1H\x1b[K {} {:04d}-{:02d}-{:02d}  {}".format(
+                    days[lt[6] % 7], lt[0], lt[1], lt[2], _paint(label, GREY)), end="")
+                rows = big_lines("{:02d}:{:02d}:{:02d}".format(lt[3], lt[4], lt[5]))
+                margin = " " * max(0, (DISPLAY_WIDTH - len(rows[0])) // 2)
+                for i, row in enumerate(rows):
+                    print("\x1b[{};1H\x1b[K{}{}".format(5 + i, margin, _paint(row, BCYAN)), end="")
+                print("\x1b[11;1H\x1b[K " + _paint("any key", BYELLOW) + " back", end="")
             if _read_key(200) is not None:
                 break
     except KeyboardInterrupt:
