@@ -10,7 +10,10 @@ except ImportError:
 
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
-MODULE_VERSION = "2026-03-28.2"
+HTTP_TIMEOUT = 15
+CLOCK_CONFIG_FILE = "clock_config.json"
+MIN_SYNCED_YEAR = 2024
+MODULE_VERSION = "2026-10-04.1"
 
 
 def clip(text, limit):
@@ -136,7 +139,7 @@ def paged_lines(lines, page_lines=PAGE_LINES):
         print(line)
         count += 1
         if count >= page_lines and index < total - 1:
-            cmd = normalize_nav_cmd(safe_input("Enter=next q=stop: "))
+            cmd = normalize_nav_cmd(_nav_input("Enter=next q=stop: "))
             if cmd == "q":
                 print("(stopped)")
                 break
@@ -210,7 +213,7 @@ def browse_items(
         print("n/p move  d detail")
         print("q quit   # jump")
 
-        cmd = normalize_nav_cmd(safe_input(nav_prompt))
+        cmd = normalize_nav_cmd(_nav_input(nav_prompt))
         if cmd == "":
             continue
         if cmd == "q":
@@ -328,29 +331,52 @@ def safe_input(prompt):
         return ""
 
 
-_HTTP_TIMEOUT_SET = False
+def _nav_input(prompt):
+    # Ctrl+C / Ctrl+D quit a viewer or pager instead of redrawing it forever.
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        return "q"
 
 
 def http_module():
-    global _HTTP_TIMEOUT_SET
     try:
         import urequests as requests
     except ImportError:
         print("Missing urequests.")
         print("Install: import mip; mip.install('urequests')")
         return None
-    if not _HTTP_TIMEOUT_SET:
-        try:
-            import usocket
-            usocket.setdefaulttimeout(10)
-        except Exception:
-            try:
-                import socket
-                socket.setdefaulttimeout(10)
-            except Exception:
-                pass
-        _HTTP_TIMEOUT_SET = True
     return requests
+
+
+def http_request(requests, method, url, timeout=HTTP_TIMEOUT, **kwargs):
+    # MicroPython's socket module has no setdefaulttimeout(), so the timeout
+    # must travel with each request; very old urequests builds lack the kwarg.
+    try:
+        return requests.request(method, url, timeout=timeout, **kwargs)
+    except TypeError as error:
+        if "keyword" not in str(error):
+            raise
+        return requests.request(method, url, **kwargs)
+
+
+def utc_offset_hours():
+    data = load_json(CLOCK_CONFIG_FILE)
+    try:
+        return int(data.get("utc_offset", 0))
+    except Exception:
+        return 0
+
+
+def clock_synced():
+    # rp2 boots with its clock at 2021-01-01 until NTP (or a host tool) sets it.
+    return time.gmtime()[0] >= MIN_SYNCED_YEAR
+
+
+def local_time(offset=None):
+    if offset is None:
+        offset = utc_offset_hours()
+    return time.gmtime(time.time() + offset * 3600)
 
 
 def check_wifi():
