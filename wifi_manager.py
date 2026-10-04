@@ -3,6 +3,8 @@ import time
 from pico_utils import clip as _clip_util
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import read_key as _read_key, read_line as _read_line
+from pico_utils import clock_synced as _clock_synced
 
 try:
     import ujson as json
@@ -20,7 +22,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-04.1"
+WIFI_MANAGER_VERSION = "2026-10-04.2"
 _NETWORK_MODULE = None
 
 
@@ -190,13 +192,6 @@ def print_connection_status():
         print("IP:", info["ifconfig"][0])
 
 
-def _safe_input(prompt):
-    try:
-        return input(prompt)
-    except (EOFError, KeyboardInterrupt):
-        return ""
-
-
 def choose_network(networks):
     if not networks:
         print("No WiFi networks.")
@@ -214,29 +209,18 @@ def choose_network(networks):
     if len(networks) > MENU_NETWORK_LIMIT:
         print("Showing top {} of {}".format(MENU_NETWORK_LIMIT, len(networks)))
 
-    MAX_ATTEMPTS = 5
-    attempts = 0
-    while attempts < MAX_ATTEMPTS:
-        choice = _safe_input("Net # (Enter=cancel): ").strip()
-
-        if choice == "":
-            return None
-
+    print("Press 1-{}, q/Esc cancel".format(len(visible_networks)))
+    while True:
         try:
-            selected_index = int(choice)
-        except ValueError:
-            print("Please enter a valid number.")
-            attempts += 1
-            continue
-
-        if 1 <= selected_index <= len(visible_networks):
-            return visible_networks[selected_index - 1][0]
-
-        print("Selection out of range.")
-        attempts += 1
-
-    print("Too many invalid attempts.")
-    return None
+            key = _read_key()
+        except KeyboardInterrupt:
+            return None
+        if key in (None, "q", "Q", "esc", "eof", "enter"):
+            return None
+        if key and len(key) == 1 and key.isdigit():
+            selected_index = int(key)
+            if 1 <= selected_index <= len(visible_networks):
+                return visible_networks[selected_index - 1][0]
 
 
 def connect_saved_networks(wlan, credentials):
@@ -276,6 +260,7 @@ def connect_saved_networks(wlan, credentials):
         if connect_to_wifi(wlan, ssid, credentials[ssid]):
             print("OK:", _clip_ssid(ssid))
             print("IP:", wlan.ifconfig()[0])
+            _sync_clock()
             return True
         print("Fail:", _clip_ssid(ssid))
 
@@ -310,8 +295,11 @@ def auto_connect_or_prompt(interactive=True):
         print("No selection.")
         return False
 
-    password = _safe_input("Pass '{}': ".format(_clip_ssid(selected_ssid)))
-    if password == "":
+    try:
+        password = _read_line("Pass '{}': ".format(_clip_ssid(selected_ssid)), mask="*")
+    except KeyboardInterrupt:
+        password = None
+    if not password:
         print("No password.")
         return False
 
@@ -321,10 +309,54 @@ def auto_connect_or_prompt(interactive=True):
         save_credentials(credentials)
         print("OK. Saved.")
         print("IP:", wlan.ifconfig()[0])
+        _sync_clock()
         return True
 
     print("Connect failed.")
     return False
+
+
+def _sync_clock():
+    # after power-on the clock reads 2021-01-01: set it once we are online
+    if _clock_synced():
+        return
+    try:
+        import clock_ntp
+
+        clock_ntp.sync()
+    except Exception as error:
+        print("NTP:", _clip(error, 24))
+
+
+def saved():
+    names = sorted(load_credentials().keys())
+    if not names:
+        print("No saved networks.")
+        return []
+    for index, name in enumerate(names, start=1):
+        print("{}: {}".format(index, _clip(name, DISPLAY_LINE_CHARS - 4)))
+    return names
+
+
+def forget(name_or_index):
+    credentials = load_credentials()
+    names = sorted(credentials.keys())
+    name = None
+    try:
+        pos = int(name_or_index) - 1
+        if 0 <= pos < len(names):
+            name = names[pos]
+    except ValueError:
+        if name_or_index in credentials:
+            name = name_or_index
+    if name is None:
+        print("Not found.")
+        return False
+    del credentials[name]
+    if not save_credentials(credentials):
+        return False
+    print("Forgot:", _clip_ssid(name))
+    return True
 
 
 def ac(interactive=True):
@@ -349,6 +381,8 @@ def help():
     print("ac()     Auto-connect/prompt")
     print("acs()    Auto-connect silent")
     print("st()     Connection status")
+    print("saved()  Saved networks")
+    print("forget(n) Forget a network")
     print("tip: import wifi_manager as w")
 
 
