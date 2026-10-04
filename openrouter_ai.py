@@ -10,6 +10,7 @@ from pico_utils import load_json, save_json, http_module as _http_module, check_
 from pico_utils import http_request as _http_request
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
+from pico_utils import DISPLAY_WIDTH
 
 try:
     import ujson as json
@@ -20,12 +21,16 @@ except ImportError:
 CONFIG_FILE = "openrouter_config.json"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
-DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char display. Prefer plain text."
-DISPLAY_WIDTH = 32
+DEFAULT_SYSTEM_PROMPT = (
+    "Reply concise, in plain text: no markdown, tables or emoji."
+    " It is read on a small handheld screen."
+)
+MAX_SYSTEM_CHARS = 220
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-AI_TIMEOUT = 60  # non-streaming: the reply arrives only once generation ends
-MODULE_VERSION = "2026-10-04.1"
+# per read: a non-streamed reply sends nothing until generation ends
+AI_TIMEOUT = 60
+MODULE_VERSION = "2026-10-04.2"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -126,7 +131,38 @@ def set_model(model):
 
 
 def set_system_prompt(text):
+    if len(str(text).strip()) > MAX_SYSTEM_CHARS:
+        print("Note: only the first {} chars are sent.".format(MAX_SYSTEM_CHARS))
     return _set_config_value("system_prompt", text, "Empty prompt.", "System prompt saved.")
+
+
+def set_endpoint(url=None):
+    """OpenAI-compatible chat URL, e.g. a local llama-server or LM Studio:
+    set_endpoint('http://192.168.1.20:8080/v1/chat/completions').
+    No argument: back to OpenRouter."""
+    config = _load_config()
+    value = str(url).strip() if url else ""
+    if value and not (value.startswith("http://") or value.startswith("https://")):
+        print("Invalid URL.")
+        return False
+    if value:
+        config["endpoint"] = value
+    elif "endpoint" in config:
+        del config["endpoint"]
+    if not _save_config(config):
+        return False
+    print("Endpoint:", _clip(value or OPENROUTER_URL, 44))
+    return True
+
+
+def set_stream(on=True):
+    """Stream replies as they are generated (default on)."""
+    config = _load_config()
+    config["stream"] = bool(on)
+    if not _save_config(config):
+        return False
+    print("Stream:", "on" if on else "off")
+    return True
 
 
 def clear_system_prompt():
@@ -163,10 +199,20 @@ def show_config():
     model = config.get("model", DEFAULT_MODEL)
     has_key = bool(config.get("api_key"))
     has_system = bool(config.get("system_prompt"))
+    endpoint = config.get("endpoint") or OPENROUTER_URL
+    stream = config.get("stream", True)
     print("Model:", model)
     print("Key:", has_key)
     print("System:", has_system)
-    return {"model": model, "has_key": has_key, "has_system": has_system}
+    print("Endpoint:", _clip(endpoint, 44))
+    print("Stream:", stream)
+    return {
+        "model": model,
+        "has_key": has_key,
+        "has_system": has_system,
+        "endpoint": endpoint,
+        "stream": stream,
+    }
 
 
 def _extract_text(response_json):
@@ -287,6 +333,128 @@ def view(index=1):
     )
 
 
+def _iter_lines(raw):
+    # Lines from a response body read in small chunks (no whole-body buffer).
+    buf = bytearray(256)
+    pending = b""
+    while True:
+        n = raw.readinto(buf)
+        if not n:
+            break
+        pending += bytes(buf[:n])
+        start = 0
+        while True:
+            nl = pending.find(b"\n", start)
+            if nl < 0:
+                break
+            yield pending[start:nl]
+            start = nl + 1
+        pending = pending[start:]
+    if pending:
+        yield pending
+
+
+def _delta_text(event):
+    choices = event.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0]
+    if not isinstance(first, dict):
+        return None
+    delta = first.get("delta")
+    if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+        return delta["content"]
+    return None
+
+
+def _error_text(err):
+    if isinstance(err, dict):
+        err = err.get("message", str(err))
+    return _clip(err, 80)
+
+
+class _StreamPrinter:
+    # Prints streamed text with word wrap: a word is held until it ends.
+    def __init__(self, width=DISPLAY_WIDTH, out=None):
+        self.width = width
+        self.out = out or (lambda text: print(text, end=""))
+        self.col = 0
+        self.word = ""
+        self.space = False
+
+    def __call__(self, text):
+        for ch in text:
+            if ch == "\n":
+                self._flush()
+                self.out("\n")
+                self.col = 0
+                self.space = False
+            elif ch == " ":
+                self._flush()
+                self.space = self.col > 0
+            else:
+                self.word += ch
+                if len(self.word) >= self.width:
+                    self._flush()
+
+    def _flush(self):
+        word = self.word
+        if not word:
+            return
+        self.word = ""
+        gap = 1 if self.space else 0
+        if self.col + gap + len(word) > self.width:
+            self.out("\n")
+            self.col = 0
+        elif gap:
+            self.out(" ")
+            self.col += 1
+        self.out(word)
+        self.col += len(word)
+        self.space = False
+
+    def close(self):
+        self._flush()
+        if self.col:
+            self.out("\n")
+            self.col = 0
+
+
+def _sse_text(raw, emit):
+    # OpenAI-style server-sent events -> reply text, emitted as it arrives.
+    parts = []
+    size = 0
+    try:
+        for line in _iter_lines(raw):
+            line = line.strip()
+            if not line.startswith(b"data:"):
+                continue  # blank separators and ": keep-alive" comments
+            data = line[5:].strip()
+            if data == b"[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if "error" in event:
+                emit("\n")
+                print("Err:", _error_text(event["error"]))
+                break
+            delta = _delta_text(event)
+            if delta:
+                emit(delta)
+                parts.append(delta)
+                size += len(delta)
+                if size >= MAX_OUTPUT_CHARS:
+                    break
+    except (OSError, ValueError) as error:
+        emit("\n")
+        print("(stream cut:", _clip(error, 24), ")")
+    return "".join(parts)
+
+
 def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, raw=False):
     requests = _http_module()
     if requests is None:
@@ -297,10 +465,12 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
     config = _load_config()
     api_key = config.get("api_key", "")
+    endpoint = config.get("endpoint") or OPENROUTER_URL
+    stream = bool(config.get("stream", True))
     selected_model = model or config.get("model", DEFAULT_MODEL)
     system_prompt = config.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
 
-    if api_key == "":
+    if api_key == "" and "openrouter.ai" in endpoint:
         print("No API key. Use set_api_key(...)")
         return None
 
@@ -313,7 +483,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
     messages = []
     if system_prompt:
-        messages.append({"role": "system", "content": _clip(system_prompt, 220)})
+        messages.append({"role": "system", "content": _clip(system_prompt, MAX_SYSTEM_CHARS)})
     if use_mem and _HISTORY:
         for item in _HISTORY:
             messages.append({"role": item["role"], "content": item["content"]})
@@ -325,32 +495,62 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         "max_tokens": int(max_tokens),
         "temperature": float(temperature),
     }
+    if stream:
+        payload["stream"] = True
 
     headers = {
-        "Authorization": "Bearer " + api_key,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://picocalc.local",
         "X-Title": "PicoCalc",
     }
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
 
     print("AI>", selected_model)
     start_ms = _ticks_ms()
 
     response = None
+    text = None
     try:
         response = _http_request(
             requests,
             "POST",
-            OPENROUTER_URL,
+            endpoint,
             timeout=AI_TIMEOUT,
             headers=headers,
             data=json.dumps(payload),
         )
         status = response.status_code
-        try:
-            body = response.json()
-        except Exception:
-            body = None
+        if status != 200:
+            print("HTTP:", status)
+            try:
+                body = response.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict) and "error" in body:
+                print("Err:", _error_text(body["error"]))
+            else:
+                print("Bad response")
+            return None
+        if stream:
+            print("---")
+            printer = _StreamPrinter()
+            text = _sse_text(response.raw, printer)
+            printer.close()
+        else:
+            try:
+                body = response.json()
+            except Exception:
+                body = None
+            if body is None:
+                print("Invalid JSON response")
+                return None
+            text = _extract_text(body)
+            del body
+            if text is not None:
+                text = _clip(text, MAX_OUTPUT_CHARS)
+                print("---")
+                _paged_print(text)
     except Exception as error:
         print("Request fail:", error)
         return None
@@ -361,31 +561,11 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
             except Exception:
                 pass
 
-    if status != 200:
-        print("HTTP:", status)
-        if isinstance(body, dict) and "error" in body:
-            err = body["error"]
-            if isinstance(err, dict):
-                err = err.get("message", str(err))
-            print("Err:", _clip(err, 80))
-        else:
-            print("Bad response")
-        return None
-
-    if body is None:
-        print("Invalid JSON response")
-        return None
-
-    text = _extract_text(body)
-    del body
-    if text is None:
+    if not text:
         print("No text in response")
         return None
 
-    text = _clip(text, MAX_OUTPUT_CHARS)
     elapsed_ms = _ticks_diff(_ticks_ms(), start_ms)
-    print("---")
-    _paged_print(text)
     print("---")
     print("ms:", elapsed_ms)
 
@@ -402,6 +582,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 def chat(with_view=False):
     _screen_header("AI Chat")
     print("q or empty line to exit")
+    print("A sent question can't be cancelled.")
     print("")
     try:
         while True:
@@ -449,6 +630,8 @@ def help():
     print("mem_status()  Show memory info")
     print("mem_clear()   Clear memory")
     print("show_config() Show settings")
+    print("set_endpoint(url) Local server")
+    print("set_stream(b) Stream replies")
     print("tip: import openrouter_ai as ai")
 
 
