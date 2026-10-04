@@ -217,20 +217,53 @@ def test_screen_term_bytes_and_cp437():
     check("left arrow folds, right maps", pu.to_cp437("←→"), "<\x1a")
 
 
+def _cp437_one_by_one(text):
+    out = []
+    for ch in text:
+        if ord(ch) < 128:
+            out.append(ch)
+            continue
+        idx = pu._CP437_SRC.find(ch)
+        out.append(pu._CP437_DST[idx] if idx >= 0 else pu._FOLDS.get(ch, "?"))
+    return "".join(out)
+
+
+def test_cp437_replace_matches_loop():
+    samples = [
+        "città è ’ok…",
+        "\x1b[38;5;8m─────\x1b[0m ≈ » ¶ ° ≡ ± ∩ Θ ■ ▬ ► §",
+        "Perché più già",
+        "á\xa0é",  # á maps to 0xa0, a real NBSP must not take its glyph
+        "€ … — “quoted” ✓",
+    ]
+    for text in samples:
+        check("cp437 " + repr(text[:12]), pu.to_cp437(text), _cp437_one_by_one(text))
+
+
 class EioVt(FakeVt):
     def readinto(self, buf):
         raise OSError(5)
 
 
+class CaptureBugVt(FakeVt):
+    # The firmware's Ctrl+U screenshot raised AttributeError from readinto().
+    def readinto(self, buf):
+        raise AttributeError("'PicoDisplay' object has no attribute 'buffer'")
+
+
 def test_screen_term_survives_keyboard_eio():
     term = pu._ScreenTerm(EioVt())
     check("EIO read is no key", term.readinto(bytearray(1)), None)
+    check("firmware bug is no key", pu._ScreenTerm(CaptureBugVt()).readinto(bytearray(1)), None)
     saved = pu._terminal
     try:
         eio = EioVt()
         pu._terminal = lambda: eio
         pu._STDIN_POLL = False
         check("poll survives EIO", pu._poll_byte(), None)
+        bug = CaptureBugVt()
+        pu._terminal = lambda: bug
+        check("poll survives a firmware bug", pu._poll_byte(), None)
     finally:
         pu._terminal = saved
         pu._STDIN_POLL = None
@@ -617,10 +650,262 @@ def test_wifi_saved_forget():
         _rm(_TMP)
 
 
+class FakePoll:
+    def __init__(self, ready):
+        self.ready = ready
+
+    def poll(self, timeout=0):
+        return [1] if self.ready else []
+
+
+class IdleVt(FakeVt):
+    def readinto(self, buf):
+        return 0
+
+
+def test_host_takeover():
+    # USB input while the PicoCalc keyboard is the key source is a host tool
+    # asking for the REPL: it must not be read as keys.
+    saved = pu._terminal
+    try:
+        idle = IdleVt()
+        pu._terminal = lambda: idle
+        pu._STDIN_POLL = FakePoll(False)
+        check("nothing pending", pu._poll_byte(), None)
+        pu._STDIN_POLL = FakePoll(True)
+        try:
+            pu._poll_byte()
+            check("usb input hands over", False, True)
+        except pu.HostTakeover:
+            pass
+        check("not an Exception", issubclass(pu.HostTakeover, Exception), False)
+        check("not a Ctrl+C", issubclass(pu.HostTakeover, KeyboardInterrupt), False)
+    finally:
+        pu._terminal = saved
+        pu._STDIN_POLL = None
+
+
+# lists
+
+
+def test_pick_keys():
+    try:
+        keys_from(b"\x1b[B\x1b[Bx")
+        check("down down x", pu.pick("T", ["a", "b", "c"]), ("x", 2))
+        keys_from(b"2")
+        check("digit picks", pu.pick("T", ["a", "b", "c"]), ("enter", 1))
+        keys_from(b"9q")
+        check("digit past end ignored", pu.pick("T", ["a", "b"]), ("q", 0))
+        keys_from(b"\x1b[Ak\x1b[Bn")
+        check("clamped at top", pu.pick("T", ["a", "b"]), ("n", 1))
+        keys_from(b"n")
+        check("empty list", pu.pick("T", []), ("n", None))
+        keys_from(b"j" * 40 + b"x")
+        check("scrolls", pu.pick("T", [str(i) for i in range(50)]), ("x", 40))
+        keys_from(b"jq")
+        rows = ((("a", "b"),), (("c", "d"),))
+        check("two footer rows", pu.pick("T", ["a", "b"], footer=rows, pos=1), ("q", 1))
+        keys_from(b"\x1b[B\r")
+        check("select_list enter", pu.select_list("T", ["a", "b"]), 1)
+        keys_from(b"zj\r")
+        check("select_list other key", pu.select_list("T", ["a", "b"]), 1)
+        keys_from(b"\x1b\x1b")
+        check("select_list esc", pu.select_list("T", ["a", "b"]), None)
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+
+
+# apps from the SD card
+
+
+def _write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def _rmtree(path):
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for name in names:
+        full = path + "/" + name
+        try:
+            os.remove(full)
+        except OSError:
+            _rmtree(full)
+    os.rmdir(path)
+
+
+def test_app_header():
+    import apps
+
+    check("two fields", apps.parse_header("# picocalc-app: Tetris | Blocks"), ("Tetris", "", "Blocks"))
+    check("three fields", apps.parse_header("# picocalc-app: Tetris | Games | Blocks "), ("Tetris", "Games", "Blocks"))
+    check("name only", apps.parse_header("# picocalc-app:Hello"), ("Hello", "", ""))
+    check("no name", apps.parse_header("# picocalc-app:  | x"), None)
+    check("plain comment", apps.parse_header("# hello"), None)
+
+
+def test_app_discover_and_run():
+    import apps
+
+    folder = _HERE + "/_tmp_apps"
+    _rmtree(folder)
+    os.mkdir(folder)
+    try:
+        _write(folder + "/zeta.py", "# picocalc-app: Alpha | Games | fun\nimport pico_utils\npico_utils._APP_RAN = __name__\n")
+        _write(folder + "/beta.py", "import _tmp_helper\n_tmp_helper.go()\n")
+        _write(folder + "/_tmp_helper.py", "import pico_utils\ndef go():\n    pico_utils._APP_RAN = 'helper'\n")
+        _write(folder + "/._beta.py", "junk")
+        _write(folder + "/notes.txt", "x")
+        _write(folder + "/boom.py", "1/0\n")
+        _write(folder + "/leave.py", "import sys\nsys.exit()\n")
+        found = apps.discover((folder,))
+        names = [app[0] for app in found]
+        check("sorted, dot files and non-py skipped", names, ["_tmp_helper", "Alpha", "beta", "boom", "leave"])
+        check("header fields", found[1][:3], ("Alpha", "Games", "fun"))
+        keys_from(b" ")
+        check("runs as main", apps.run_app(folder + "/zeta.py"), True)
+        check("saw __main__", getattr(pu, "_APP_RAN", None), "__main__")
+        keys_from(b" ")
+        apps.run_app(folder + "/beta.py")
+        check("sibling import", getattr(pu, "_APP_RAN", None), "helper")
+        check("its modules dropped", "_tmp_helper" in sys.modules, False)
+        check("path restored", folder in sys.path, False)
+        keys_from(b" ")
+        check("error comes back", apps.run_app(folder + "/boom.py"), False)
+        keys_from(b" ")
+        check("sys.exit comes back", apps.run_app(folder + "/leave.py"), True)
+        check("missing dir", apps.discover((folder + "/nope",)), [])
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        if hasattr(pu, "_APP_RAN"):
+            del pu._APP_RAN
+        _rmtree(folder)
+
+
+# files
+
+
+def test_files_paths_and_listing():
+    import files
+
+    check("join root", files.join("/", "a.py"), "/a.py")
+    check("join dir", files.join("/sd/", "b"), "/sd/b")
+    check("parent", files.parent("/sd/apps"), "/sd")
+    check("parent of top", files.parent("/sd"), "/")
+    check("parent of root", files.parent("/"), "/")
+    folder = _HERE + "/_tmp_files"
+    _rmtree(folder)
+    os.mkdir(folder)
+    try:
+        _write(folder + "/b.txt", "12345")
+        _write(folder + "/A.txt", "")
+        os.mkdir(folder + "/zdir")
+        check("dirs first, then by name", files.entries(folder), [("zdir", True, 0), ("A.txt", False, 0), ("b.txt", False, 5)])
+        keys_from(b"n")
+        check("delete needs y", files.delete(folder + "/b.txt"), False)
+        keys_from(b"y")
+        check("delete file", files.delete(folder + "/b.txt"), True)
+        keys_from(b"y")
+        check("delete empty dir", files.delete(folder + "/zdir", True), True)
+        check("left", [e[0] for e in files.entries(folder)], ["A.txt"])
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        _rmtree(folder)
+
+
+def test_files_text():
+    import files
+
+    check("text", files.is_binary(b"def f():\n\treturn 1\n"), False)
+    check("utf-8 is text", files.is_binary("città".encode()), False)
+    check("nul is binary", files.is_binary(b"ab\x00cd"), True)
+    check("control bytes", files.is_binary(bytes(range(1, 9)) * 4), True)
+    check("empty", files.is_binary(b""), False)
+    check("cut character dropped", files.decode("caffè".encode()[:-1]), "caff")
+    check("bad byte", files.decode(b"a\xffb\xfe"), "a?b?")
+    check("whole multi-byte kept", files.decode("è".encode()), "è")
+    check(
+        "hard wrap keeps indent",
+        files.text_lines("    abcdef\n\n\tx\x1by\n", width=6),
+        ["    ab", "cdef", "", "    x?", "y"],
+    )
+    check("crlf", files.text_lines("a\r\nb"), ["a", "b"])
+
+
+# snake
+
+
+class FakeRng:
+    def __init__(self, values):
+        self.values = list(values)
+
+    def randint(self, low, high):
+        return self.values.pop(0) if self.values else low
+
+
+def test_snake_moves_and_turns():
+    import snake
+
+    s = snake.new_game(10, 5, FakeRng([0, 0]))
+    check("start", s["snake"], [(3, 2), (4, 2), (5, 2)])
+    check("food placed", s["food"], (0, 0))
+    check("moved", snake.step(s), "moved")
+    check("head right", s["snake"][-1], (6, 2))
+    check("length kept", len(s["snake"]), 3)
+    snake.turn(s, (-1, 0))
+    snake.step(s)
+    check("reverse ignored", s["snake"][-1], (7, 2))
+    snake.turn(s, (0, -1))
+    snake.turn(s, (-1, 0))
+    snake.step(s)
+    check("first queued turn", s["snake"][-1], (7, 1))
+    snake.step(s)
+    check("second queued turn", s["snake"][-1], (6, 1))
+    check("cells match", s["cells"], set(s["snake"]))
+
+
+def test_snake_eats_and_dies():
+    import snake
+
+    s = snake.new_game(10, 5, FakeRng([6, 2]))
+    check("food ahead", s["food"], (6, 2))
+    check("ate", snake.step(s), "ate")
+    check("grew", len(s["snake"]), 4)
+    check("score", s["score"], 1)
+    for _ in range(3):
+        snake.step(s)
+    check("wall", snake.step(s), "dead")
+    loop = snake.new_game(5, 5, FakeRng([4, 4]))
+    loop["snake"] = [(1, 1), (2, 1), (2, 2), (1, 2)]
+    loop["cells"] = set(loop["snake"])
+    loop["dir"] = (0, -1)
+    check("tail cell is free", snake.step(loop), "moved")
+    bite = snake.new_game(5, 5, FakeRng([4, 4]))
+    bite["snake"] = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1)]
+    bite["cells"] = set(bite["snake"])
+    bite["dir"] = (0, -1)
+    check("own body", snake.step(bite), "dead")
+
+
+def test_snake_food_placement():
+    import snake
+
+    s = snake.new_game(4, 1, FakeRng([1, 0] * 60))
+    check("crowded: first free cell", s["food"], (3, 0))
+    s["cells"].add((3, 0))
+    check("full field", snake.place_food(s), None)
+    check("no food left", s["food"], None)
+
+
 def test_menu_imports():
     import menu
 
-    check("menu apps", len(menu._APPS), 9)
+    check("menu apps", len(menu._APPS), 12)
+    check("one key each", len(menu._KEY_INDEX), len(menu._APPS))
+    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "a", "s")], [9, 10, 11])
 
 
 def main():
