@@ -3,7 +3,7 @@ import time
 from pico_utils import clip as _clip_util
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
-from pico_utils import read_key as _read_key, read_line as _read_line
+from pico_utils import read_key as _read_key, read_line as _read_line, poll_key as _poll_key
 from pico_utils import clock_synced as _clock_synced
 
 try:
@@ -22,7 +22,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-04.2"
+WIFI_MANAGER_VERSION = "2026-10-04.3"
 _NETWORK_MODULE = None
 
 
@@ -149,6 +149,11 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
             return True
 
         if status in (network.STAT_WRONG_PASSWORD, network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL):
+            return False
+
+        if _poll_key() in ("q", "Q", "esc"):
+            wlan.disconnect()
+            print("Cancelled.")
             return False
 
         _sleep_ms(CONNECT_POLL_INTERVAL_MS)
