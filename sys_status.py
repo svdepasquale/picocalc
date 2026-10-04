@@ -3,10 +3,10 @@ import os
 import time
 
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
+from pico_utils import PAGE_LINES, battery as _battery
 
 
-MODULE_VERSION = "2026-10-04.1"
-PAGE_LINES = 8
+MODULE_VERSION = "2026-10-04.2"
 _IMPORT_TICKS = ticks_ms()
 
 
@@ -82,6 +82,16 @@ def freq():
         return None
 
 
+def bat():
+    info = _battery()
+    if info is None:
+        print("Battery: n/a")
+        return None
+    pct, charging = info
+    print("Battery: {}%{}".format(pct, " (charging)" if charging else ""))
+    return info
+
+
 def ls(path="/"):
     try:
         items = sorted(os.listdir(path))
@@ -131,6 +141,7 @@ def info():
     ip()
     print("---")
     freq()
+    bat()
     return True
 
 
@@ -146,6 +157,7 @@ def help():
     print("flash()/df()  Flash storage")
     print("uptime()      Time since boot")
     print("ip()          Network info")
+    print("bat()         Battery level")
     print("freq()        CPU frequency")
     print("ls(path)      List directory")
     print("gc_run()      Run GC + stats")
