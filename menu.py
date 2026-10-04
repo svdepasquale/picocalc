@@ -1,20 +1,21 @@
-"""Launcher for standalone PicoCalc use: one key opens an app."""
+"""Launcher for standalone PicoCalc use: a number (or arrows + Enter) opens an app."""
 
 import gc
 import sys
 
-from pico_utils import battery as _battery
-from pico_utils import clear_screen as _clear_screen
-from pico_utils import clock_synced as _clock_synced
-from pico_utils import local_time as _local_time
+from pico_utils import DISPLAY_WIDTH
+from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
+from pico_utils import key_bar as _key_bar, load_json as _load_json, paint as _paint
 from pico_utils import read_key as _read_key, read_line as _read_line
-from pico_utils import screen_header as _screen_header, wait_key as _wait_key
-from pico_utils import wifi_connected as _wifi_connected
+from pico_utils import screen_header as _screen_header, title_bar as _title_bar
+from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
+from pico_utils import BLACK, BCYAN, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
-REFRESH_MS = 30000  # menu redraw, keeps the clock in the status line current
+REFRESH_MS = 30000  # status bar refresh while the menu waits
+_FIRST_ROW = 3  # screen row of the first app (title bar, blank line)
 _BACK = ("q", "Q", "esc", "eof")
 _APP_MODULES = (
     "wifi_manager",
@@ -46,25 +47,13 @@ def _load(name):
     return __import__(name)
 
 
-def _status():
-    parts = []
-    if _clock_synced():
-        now = _local_time()
-        parts.append("{:02d}:{:02d}".format(now[3], now[4]))
-    bat = _battery()
-    if bat is not None:
-        parts.append("Bat {}%{}".format(bat[0], " chg" if bat[1] else ""))
-    parts.append("WiFi " + ("on" if _wifi_connected() else "off"))
-    return "  ".join(parts)
-
-
 def _choose(title, body, keys):
-    # Draw a sub-screen and return the next key (None for "back").
+    # A sub-screen: optional body, a hint bar, then the next key (None = back).
     _screen_header(title)
     if body is not None:
         body()
-    print("---")
-    print(keys)
+    print(_paint("─" * DISPLAY_WIDTH, GREY))
+    _key_bar(keys + (("q", "back"),))
     key = _read_key()
     return None if key in _BACK else key
 
@@ -75,7 +64,11 @@ def _choose(title, body, keys):
 def _wifi():
     w = _load("wifi_manager")
     while True:
-        key = _choose("WiFi", w.print_connection_status, "c connect  s saved  f forget  q back")
+        key = _choose(
+            "WiFi",
+            w.print_connection_status,
+            (("c", "connect"), ("s", "saved"), ("f", "forget")),
+        )
         if key is None:
             return
         if key == "c":
@@ -86,7 +79,7 @@ def _wifi():
             _wait_key()
         elif key == "f":
             if w.saved():
-                number = _read_line("Forget #: ")
+                number = _read_line("Forget # then Enter: ")
                 if number:
                     w.forget(number)
             _wait_key()
@@ -102,7 +95,7 @@ def _news():
         key = _choose(
             "News",
             None,
-            "f feeds  m Miniflux  v last list\nd mark Miniflux read  q back",
+            (("f", "feeds"), ("m", "Miniflux"), ("v", "last list"), ("d", "mark read")),
         )
         if key is None:
             return
@@ -129,15 +122,15 @@ def _weather():
 
     def body():
         m.now()
-        print("---")
+        print("")
         m.forecast(3)
 
     while True:
-        key = _choose("Weather", body, "r refresh  c city  q back")
+        key = _choose("Weather", body, (("r", "refresh"), ("c", "city")))
         if key is None:
             return
         if key == "c":
-            city = _read_line("City: ")
+            city = _read_line("City then Enter: ")
             if city:
                 m.set_city(city)
                 _wait_key()
@@ -146,7 +139,11 @@ def _weather():
 def _notes():
     t = _load("notes")
     while True:
-        key = _choose("Notes", t.count, "v view  a add  l list  c clear done  q back")
+        key = _choose(
+            "Notes",
+            t.count,
+            (("v", "view"), ("a", "add"), ("l", "list"), ("c", "clear done")),
+        )
         if key is None:
             return
         if key == "v":
@@ -171,10 +168,35 @@ def _synth():
     _load("synthesizer").piano()
 
 
+def _set_zone(c):
+    print("1 Italy/CET  2 UK  3 UTC  4 other")
+    zone = _read_key()
+    if zone == "1":
+        c.set_utc_offset(1)
+        c.set_dst(True)
+    elif zone == "2":
+        c.set_utc_offset(0)
+        c.set_dst(True)
+    elif zone == "3":
+        c.set_utc_offset(0)
+        c.set_dst(False)
+    elif zone == "4":
+        offset = _read_line("UTC offset in winter, then Enter: ")
+        if offset:
+            c.set_utc_offset(offset)
+            print("EU summer time? y/n")
+            c.set_dst(_read_key() in ("y", "Y"))
+    _wait_key()
+
+
 def _clock():
     c = _load("clock_ntp")
     while True:
-        key = _choose("Clock", c.date, "l live  s sync  t timer  c countdown\nz time zone  q back")
+        key = _choose(
+            "Clock",
+            c.date,
+            (("l", "live"), ("s", "sync"), ("t", "timer"), ("c", "countdown"), ("z", "zone")),
+        )
         if key is None:
             return
         if key == "l":
@@ -186,82 +208,174 @@ def _clock():
             c.timer_toggle()
             _wait_key()
         elif key == "c":
-            secs = _read_line("Seconds: ")
+            secs = _read_line("Seconds then Enter: ")
             if secs:
                 c.countdown(secs)
                 _wait_key()
         elif key == "z":
-            offset = _read_line("UTC offset in winter (Italy: 1): ")
-            if offset:
-                c.set_utc_offset(offset)
-                print("EU summer time? y/n")
-                c.set_dst(_read_key() in ("y", "Y"))
-                _wait_key()
+            _set_zone(c)
 
 
 def _system():
-    _load("sys_status").info()
-    _wait_key()
+    s = _load("sys_status")
+    while True:
+        key = _choose("System", s.info, (("k", "key test"), ("c", "colours")))
+        if key is None:
+            return
+        if key == "k":
+            s.keys()
+            _wait_key()
+        elif key == "c":
+            s.colors()
+            _wait_key()
+
+
+# ── hints: one cheap line of state next to some apps ──
+
+
+def _hint_wifi():
+    return "on" if _wifi_connected() else "off"
+
+
+def _hint_ai():
+    config = _load_json("openrouter_config.json") or {}
+    model = str(config.get("model") or "anthropic/claude-sonnet-5.5")
+    return model.split("/")[-1]
+
+
+def _hint_weather():
+    config = _load_json("weather_config.json") or {}
+    return str(config.get("name") or "")
+
+
+def _hint_notes():
+    notes = _load_json("notes_data.json")
+    if not isinstance(notes, list) or not notes:
+        return ""
+    open_count = len([n for n in notes if isinstance(n, dict) and not n.get("done")])
+    return "{} open".format(open_count)
 
 
 _APPS = (
-    ("1", "WiFi", _wifi),
-    ("2", "AI chat", _ai),
-    ("3", "News", _news),
-    ("4", "Weather", _weather),
-    ("5", "Notes", _notes),
-    ("6", "Calculator", _calc),
-    ("7", "Synth piano", _synth),
-    ("8", "Clock", _clock),
-    ("9", "System", _system),
+    ("1", "≈", "WiFi", _wifi, _hint_wifi),
+    ("2", "»", "AI chat", _ai, _hint_ai),
+    ("3", "¶", "News", _news, None),
+    ("4", "°", "Weather", _weather, _hint_weather),
+    ("5", "≡", "Notes", _notes, _hint_notes),
+    ("6", "±", "Calculator", _calc, None),
+    ("7", "∩", "Synth piano", _synth, None),
+    ("8", "Θ", "Clock", _clock, None),
+    ("9", "■", "System", _system, None),
 )
 
 
-def _draw():
+def _row_text(index, hints, selected):
+    key, icon, label, _, _ = _APPS[index]
+    hint = hints[index]
+    if selected:
+        text = " {}  {}  {:<13}{}".format(key, icon, label, hint)
+        return _paint("{:<{}}".format(text, DISPLAY_WIDTH)[:DISPLAY_WIDTH], BLACK, BCYAN)
+    return " {}  {}  {:<13}{}".format(
+        _paint(key, BYELLOW), _paint(icon, BCYAN), label, _paint(hint, GREY)
+    )
+
+
+def _paint_row(index, hints, selected):
+    print("\x1b[{};1H\x1b[K{}".format(_FIRST_ROW + index, _row_text(index, hints, selected)), end="")
+
+
+def _draw(selected, hints):
+    _clear_screen()
+    print(_title_bar("PicoCalc"))
+    print("")
+    for index in range(len(_APPS)):
+        print(_row_text(index, hints, index == selected))
+    print("")
+    print(_paint("─" * DISPLAY_WIDTH, GREY))
+    _key_bar((("1-9", "open"), ("↑↓", "choose"), ("Enter", "open"), ("q", "REPL")))
+
+
+def _hints():
+    out = []
+    for app in _APPS:
+        try:
+            out.append(app[4]() if app[4] else "")
+        except Exception:
+            out.append("")
+    return out
+
+
+def _launch(index):
+    try:
+        _APPS[index][3]()
+    except KeyboardInterrupt:
+        pass
+    except MemoryError:
+        gc.collect()
+        print("Out of memory.")
+        _wait_key()
+    except Exception as error:
+        print("Error:", error)
+        _wait_key()
+
+
+def _autoconnect():
+    # Saved networks only; q/Esc skips while it tries.
+    if _wifi_connected():
+        return
+    w = _load("wifi_manager")
+    if not w.load_credentials():
+        return
     _screen_header("PicoCalc")
-    print(_status())
-    print("")
-    for key, label, _ in _APPS:
-        print("  {}  {}".format(key, label))
-    print("")
-    print("  q  REPL")
+    print("Connecting Wi-Fi...  " + _paint("q", BYELLOW) + " skip")
+    try:
+        w.acs()
+    except KeyboardInterrupt:
+        pass
+    except Exception as error:
+        print("WiFi:", error)
 
 
-def run():
-    """Press a number to open an app; q (or Esc) leaves to the REPL."""
+def run(connect=True):
+    """1-9 or arrows + Enter open an app; q (or Esc) leaves to the REPL.
+    connect: join a saved Wi-Fi network first."""
+    _ensure_screen()
+    if connect:
+        _autoconnect()
+    selected = 0
+    hints = _hints()
     redraw = True
     while True:
         if redraw:
-            _draw()
+            _draw(selected, hints)
             redraw = False
         try:
             key = _read_key(REFRESH_MS)
         except KeyboardInterrupt:
             break
         if key is None:
-            # only the status line (row 4) changes: no full-screen flicker
-            print("\x1b[4;1H\x1b[K" + _status(), end="")
+            print("\x1b[1;1H" + _title_bar("PicoCalc"), end="")
             continue
         if key in _BACK:
             break
-        for app_key, _, app in _APPS:
-            if key != app_key:
-                continue
-            redraw = True
-            try:
-                app()
-            except KeyboardInterrupt:
-                pass
-            except MemoryError:
-                gc.collect()
-                print("Out of memory.")
-                _wait_key()
-            except Exception as error:
-                print("Error:", error)
-                _wait_key()
-            break
+        if key in ("up", "down"):
+            old = selected
+            selected = (selected + (1 if key == "down" else -1)) % len(_APPS)
+            _paint_row(old, hints, False)
+            _paint_row(selected, hints, True)
+            continue
+        if key == "enter":
+            index = selected
+        elif len(key) == 1 and "1" <= key <= "9":
+            index = int(key) - 1
+        else:
+            continue
+        selected = index
+        _launch(index)
+        hints = _hints()
+        redraw = True
     _clear_screen()
-    print("REPL. Menu: import menu; menu.run()")
+    print("REPL. Menu: import go")
 
 
 def ver():
@@ -272,8 +386,7 @@ def ver():
 def help():
     print("-- Menu --")
     print("run()         Open the launcher")
-    print("main.py opens it at boot;")
-    print("delete main.py for a plain REPL")
+    print("import go     Same, from the REPL")
 
 
 def h():
