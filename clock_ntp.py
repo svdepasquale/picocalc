@@ -4,9 +4,11 @@ from pico_utils import load_json, save_json, ticks_ms as _ticks_ms, ticks_diff a
 from pico_utils import CLOCK_CONFIG_FILE as CONFIG_FILE
 from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _local_time_at
 from pico_utils import clock_synced as _clock_synced
+from pico_utils import poll_key as _poll_key, read_key as _read_key, sleep_ms as _sleep_ms
+from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-04.2"
 NTP_HOST = "pool.ntp.org"
 MAX_NTP_RETRIES = 2
 
@@ -62,6 +64,18 @@ def set_utc_offset(hours):
     _save_config(config)
     print("UTC offset:", val)
     return True
+
+
+def set_dst(on=True):
+    """EU summer time on top of the UTC offset (Italy: set_utc_offset(1))."""
+    config = _load_config()
+    if on:
+        config["dst"] = "eu"
+    elif "dst" in config:
+        del config["dst"]
+    _save_config(config)
+    print("EU DST:", "on" if on else "off")
+    return bool(on)
 
 
 def sync():
@@ -148,6 +162,12 @@ def timer_stop():
     return elapsed
 
 
+def timer_toggle():
+    if _timer_start is None:
+        return timer_start()
+    return timer_stop()
+
+
 def timer_check():
     if _timer_start is None:
         print("No timer running.")
@@ -160,6 +180,15 @@ def timer_check():
     return elapsed
 
 
+def _beep():
+    try:
+        import synthesizer
+
+        synthesizer.beep(3)
+    except Exception:
+        pass
+
+
 def countdown(secs):
     try:
         total = int(secs)
@@ -169,20 +198,53 @@ def countdown(secs):
     if total < 1 or total > 86400:
         print("Range: 1..86400")
         return False
-    print("Countdown: {}s (Ctrl+C)".format(total))
+    print("Countdown: {}s (q/Esc stops)".format(total))
+    deadline = _ticks_add(_ticks_ms(), total * 1000)
+    shown = None
     try:
-        remaining = total
-        while remaining > 0:
-            if remaining == total or remaining % 10 == 0 or remaining <= 5:
-                m = remaining // 60
-                s = remaining % 60
-                print("  {}m {:02d}s".format(m, s))
-            time.sleep(1)
-            remaining -= 1
+        while True:
+            left_ms = _ticks_diff(deadline, _ticks_ms())
+            if left_ms <= 0:
+                break
+            left = (left_ms + 999) // 1000
+            if left != shown and (left == total or left % 10 == 0 or left <= 5):
+                print("  {}m {:02d}s".format(left // 60, left % 60))
+                shown = left
+            if _poll_key() in ("q", "Q", "esc"):
+                print("Cancelled.")
+                return False
+            _sleep_ms(100)
     except KeyboardInterrupt:
         print("Cancelled.")
         return False
     print("TIME!")
+    _beep()
+    return True
+
+
+def live():
+    """Big clock that updates every second; any key returns."""
+    _screen_header("Clock")
+    print("")
+    print("")
+    print("any key: back")
+    last = None
+    try:
+        while True:
+            lt, offset = _local_time()
+            if lt[5] != last:
+                last = lt[5]
+                days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                label = "UTC" + ("{:+d}".format(offset) if offset else "")
+                # rows 4-5, under the header
+                print("\x1b[4;1H\x1b[K{} {:04d}-{:02d}-{:02d}".format(
+                    days[lt[6] % 7], lt[0], lt[1], lt[2]))
+                print("\x1b[K{} {}".format(_fmt_short(lt), label), end="")
+            if _read_key(200) is not None:
+                break
+    except KeyboardInterrupt:
+        pass
+    print()
     return True
 
 
@@ -202,7 +264,10 @@ def help():
     print("timer_start()/ts() Start timer")
     print("timer_stop()/tp()  Stop timer")
     print("timer_check()/tc() Check timer")
+    print("timer_toggle() Start/stop timer")
     print("countdown(s)/cd(s) Countdown")
+    print("live()        Live clock")
+    print("set_dst(True) EU summer time")
     print("tip: import clock_ntp as c")
 
 
