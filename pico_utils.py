@@ -1,5 +1,6 @@
 import gc
 import os
+import sys
 import time
 
 try:
@@ -12,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.4"
+MODULE_VERSION = "2026-10-04.5"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -21,43 +22,55 @@ _ESC_WAIT_MS = 30
 # ── screen ──────────────────────────────────────
 
 
-def _find_terminal():
-    # The official PicoCalc firmware's screen terminal (set up by boot.py).
-    try:
-        import picocalc
-
-        return getattr(picocalc, "terminal", None)
-    except ImportError:
+def _terminal():
+    # The PicoCalc firmware's screen terminal, looked up at each use: every
+    # run of boot.py (soft reset) builds a new one.
+    mod = sys.modules.get("picocalc")
+    if mod is None:
         return None
+    return getattr(mod, "terminal", None)
 
 
-_TERM = _find_terminal()
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
-if _TERM is not None:
-    try:
-        _rows, _cols = _TERM.get_screen_size()
-        # one column short of the edge, so a full line never wraps by itself
-        DISPLAY_WIDTH = _cols - 1
-        # room for a header and the pager prompt
-        PAGE_LINES = _rows - 6
-    except Exception:
-        pass
+try:
+    _rows, _cols = _terminal().get_screen_size()
+    # one column short of the edge: the terminal wraps on the last column
+    DISPLAY_WIDTH = _cols - 1
+    # room for a header and the pager prompt
+    PAGE_LINES = _rows - 6
+except Exception:
+    pass
 
-# Unicode characters the CP437 font has, and the codes of their glyphs.
+# Unicode characters the CP437 font has, and the codes of their glyphs
+# (0x10-0x1F glyphs too: the terminal draws them, except 0x1B = ESC).
 _CP437_SRC = (
-    "\xc7\xfc\xe9\xe2\xe4\xe0\xe5\xe7\xea\xeb\xe8\xef"
-    "\xee\xec\xc4\xc5\xc9\xe6\xc6\xf4\xf6\xf2\xfb\xf9"
-    "\xff\xd6\xdc\xa2\xa3\xa5₧ƒ\xe1\xed\xf3\xfa"
-    "\xf1\xd1\xaa\xba\xbf⌐\xac\xbd\xbc\xa1\xab\xbb"
-    "\xdf\xb5\xb1\xf7\xb0\xb7\xb2"
+    "►◄↕‼\xb6\xa7▬↨↑↓→∟"
+    "↔▲▼\xc7\xfc\xe9\xe2\xe4\xe0\xe5\xe7\xea"
+    "\xeb\xe8\xef\xee\xec\xc4\xc5\xc9\xe6\xc6\xf4\xf6"
+    "\xf2\xfb\xf9\xff\xd6\xdc\xa2\xa3\xa5₧ƒ\xe1"
+    "\xed\xf3\xfa\xf1\xd1\xaa\xba\xbf⌐\xac\xbd\xbc"
+    "\xa1\xab\xbb░▒▓│┤╡╢╖╕"
+    "╣║╗╝╜╛┐└┴┬├─"
+    "┼╞╟╚╔╩╦╠═╬╧╨"
+    "╤╥╙╘╒╓╫╪┘┌█▄"
+    "▌▐▀α\xdfΓπΣσ\xb5τΦ"
+    "ΘΩδ∞φε∩≡\xb1≥≤⌠"
+    "⌡\xf7≈\xb0∙\xb7√ⁿ\xb2■"
 )
 _CP437_DST = (
-    "\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b"
-    "\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94\x95\x96\x97"
-    "\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f\xa0\xa1\xa2\xa3"
-    "\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac\xad\xae\xaf"
-    "\xe1\xe6\xf1\xf6\xf8\xfa\xfd"
+    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1c"
+    "\x1d\x1e\x1f\x80\x81\x82\x83\x84\x85\x86\x87\x88"
+    "\x89\x8a\x8b\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94"
+    "\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f\xa0"
+    "\xa1\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac"
+    "\xad\xae\xaf\xb0\xb1\xb2\xb3\xb4\xb5\xb6\xb7\xb8"
+    "\xb9\xba\xbb\xbc\xbd\xbe\xbf\xc0\xc1\xc2\xc3\xc4"
+    "\xc5\xc6\xc7\xc8\xc9\xca\xcb\xcc\xcd\xce\xcf\xd0"
+    "\xd1\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xdb\xdc"
+    "\xdd\xde\xdf\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8"
+    "\xe9\xea\xeb\xec\xed\xee\xef\xf0\xf1\xf2\xf3\xf4"
+    "\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe"
 )
 # What CP437 lacks, folded to ASCII.
 _FOLDS = {
@@ -142,18 +155,76 @@ class _ScreenTerm(_IOBase):
 
 
 def _install_screen():
-    if _TERM is None or not hasattr(os, "dupterm") or not hasattr(_TERM, "wr"):
+    term = _terminal()
+    if term is None or not hasattr(os, "dupterm") or not hasattr(term, "wr"):
         return False
-    prev = os.dupterm(_ScreenTerm(_TERM))
-    if prev is _TERM or prev is None:
+    prev = os.dupterm(_ScreenTerm(term))
+    if prev is term or prev is None:
         # None: dupterm already detached the driver's terminal (a raw-paste
         # handshake from mpremote/Thonny writes bytes it can't decode)
         return True
-    os.dupterm(prev)  # already wrapped, or not the PicoCalc terminal
-    return getattr(prev, "_cp437_screen", False)
+    if getattr(prev, "_cp437_screen", False):
+        if prev._term is term:
+            os.dupterm(prev)  # already wrapped
+        return True  # else: the old wrapper held a terminal boot.py replaced
+    os.dupterm(prev)  # not the PicoCalc terminal: leave it alone
+    return False
+
+
+def ensure_screen():
+    """Put the CP437 writer back if the screen terminal was detached or
+    rebuilt since import (host tools, boot.py runs)."""
+    global SCREEN_FIX
+    SCREEN_FIX = _install_screen()
+    return SCREEN_FIX
 
 
 SCREEN_FIX = _install_screen()
+
+
+# ── look ────────────────────────────────────────
+# 16-colour palette of the PicoCalc terminal (vt100 LUT) through SGR 38;5;n.
+BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = 0, 1, 2, 3, 4, 5, 6, 7
+GREY, BRED, BGREEN, BYELLOW, BBLUE, BMAGENTA, BCYAN, BWHITE = 8, 9, 10, 11, 12, 13, 14, 15
+RESET = "\x1b[0m"
+
+
+def paint(text, fg=None, bg=None):
+    # Coloured text that always resets: a crash never leaves colour behind.
+    codes = ""
+    if fg is not None:
+        codes += "\x1b[38;5;{}m".format(fg)
+    if bg is not None:
+        codes += "\x1b[48;5;{}m".format(bg)
+    return codes + str(text) + RESET
+
+
+def bar(fraction, width=10, fg=GREEN):
+    try:
+        full = int(fraction * width + 0.5)
+    except Exception:
+        full = 0
+    full = max(0, min(width, full))
+    return paint("█" * full, fg) + paint("░" * (width - full), GREY)
+
+
+def key_bar(pairs):
+    # One hint line, keys highlighted: key_bar((("n", "next"), ("q", "quit")))
+    print("  ".join(paint(key, BYELLOW) + " " + label for key, label in pairs))
+
+
+def status_text():
+    # "12:34  WiFi  87%": time once the clock is set, Wi-Fi, battery
+    parts = []
+    if clock_synced():
+        now = local_time()
+        parts.append("{:02d}:{:02d}".format(now[3], now[4]))
+    if wifi_connected():
+        parts.append("WiFi")
+    bat = battery()
+    if bat is not None:
+        parts.append("{}%{}".format(bat[0], "+" if bat[1] else ""))
+    return "  ".join(parts)
 
 
 def clip(text, limit):
@@ -207,15 +278,25 @@ def wrap_text(text, width=DISPLAY_WIDTH):
 
 
 def clear_screen():
-    print("\x1b[2J\x1b[H", end="")
+    print(RESET + "\x1b[2J\x1b[H", end="")
 
 
-def screen_header(title):
+def title_bar(title, status=True):
+    # Full-width coloured bar: title left, time/Wi-Fi/battery right.
+    right = status_text() if status else ""
+    left = " " + str(title)
+    gap = DISPLAY_WIDTH - len(left) - len(right) - 1
+    if gap < 1:
+        right = ""
+        gap = DISPLAY_WIDTH - len(left)
+    line = (left + " " * gap + right + " ")[:DISPLAY_WIDTH]
+    return paint(line, BWHITE, BLUE)
+
+
+def screen_header(title, status=True):
     clear_screen()
-    bar = "=" * DISPLAY_WIDTH
-    print(bar)
-    print(title.center(DISPLAY_WIDTH))
-    print(bar)
+    print(title_bar(title, status))
+    print("")
 
 
 def paged_print(text, page_lines=PAGE_LINES):
@@ -239,13 +320,13 @@ def preview_lines(text, width=DISPLAY_WIDTH, max_lines=PAGE_LINES):
     return shown
 
 
-def preview_print(text, width=DISPLAY_WIDTH, max_lines=PAGE_LINES):
+def preview_print(text, width=DISPLAY_WIDTH, max_lines=PAGE_LINES, fg=None):
     lines = preview_lines(text, width=width, max_lines=max_lines)
     if not lines:
         print("(empty)")
         return 0
     for line in lines:
-        print(line)
+        print(paint(line, fg) if fg is not None else line)
     return len(lines)
 
 
@@ -260,7 +341,7 @@ def paged_lines(lines, page_lines=PAGE_LINES):
         print(line)
         count += 1
         if count >= page_lines and index < total - 1:
-            if wait_key("-- more: any key, q stop --") in _QUIT_KEYS:
+            if wait_key(paint("-- more --", GREY) + "  " + paint("q", BYELLOW) + " stop") in _QUIT_KEYS:
                 print("(stopped)")
                 break
             count = 0
@@ -319,9 +400,10 @@ _TILDE_KEYS = {"1": "home", "2": "insert", "3": "del", "4": "end", "5": "pgup", 
 def _poll_byte():
     # One pending byte from the PicoCalc keyboard or USB serial, or None.
     global _STDIN_POLL
-    if _TERM is not None:
+    term = _terminal()
+    if term is not None:
         try:
-            if _TERM.readinto(_KEY_BUF):
+            if term.readinto(_KEY_BUF):
                 return _KEY_BUF[0]
         except OSError:  # keyboard MCU unpowered or busy
             pass
@@ -406,8 +488,10 @@ def poll_key():
     return read_key(0)
 
 
-def wait_key(prompt="-- any key --"):
+def wait_key(prompt=None):
     # One-line prompt; erases itself after the key.
+    if prompt is None:
+        prompt = paint("-- any key --", GREY)
     print(prompt, end="")
     try:
         key = read_key()
@@ -493,14 +577,14 @@ def browse_items(
         if pos >= total:
             pos = total - 1
         item = items[pos]
-        screen_header(title)
+        screen_header("{}  {}/{}".format(title, pos + 1, total))
 
         if render_summary is not None:
             render_summary(item, pos, total)
 
-        print("=" * DISPLAY_WIDTH)
-        print("n/p/arrows move  d/Enter detail")
-        print("q/Esc quit  0-9 jump")
+        print(paint("\u2500" * DISPLAY_WIDTH, GREY))
+        key_bar((("n/\u2192", "next"), ("p/\u2190", "prev"), ("d/Enter", "detail")))
+        key_bar((("q/Esc", "back"), ("0-9", "jump")))
 
         try:
             key = read_key()

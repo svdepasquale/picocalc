@@ -224,13 +224,14 @@ class EioVt(FakeVt):
 def test_screen_term_survives_keyboard_eio():
     term = pu._ScreenTerm(EioVt())
     check("EIO read is no key", term.readinto(bytearray(1)), None)
-    saved = pu._TERM
+    saved = pu._terminal
     try:
-        pu._TERM = EioVt()
+        eio = EioVt()
+        pu._terminal = lambda: eio
         pu._STDIN_POLL = False
         check("poll survives EIO", pu._poll_byte(), None)
     finally:
-        pu._TERM = saved
+        pu._terminal = saved
         pu._STDIN_POLL = None
 
 
@@ -256,16 +257,21 @@ class FakeOs:
 
 
 def test_install_screen():
-    saved = (pu.os, pu._TERM)
+    saved = (pu.os, pu._terminal)
     try:
         vt = FakeVt()
-        pu._TERM = vt
+        pu._terminal = lambda: vt
         pu.os = FakeOs(vt)
         check("wraps the PicoCalc terminal", pu._install_screen(), True)
         wrapper = pu.os.slot
         check("wrapper attached", getattr(wrapper, "_cp437_screen", False), True)
         check("already wrapped stays", pu._install_screen(), True)
         check("no double wrap", pu.os.slot is wrapper, True)
+        newer = FakeVt()  # boot.py ran again: new terminal, stale wrapper
+        pu._terminal = lambda: newer
+        check("stale wrapper replaced", pu._install_screen(), True)
+        check("wraps the new terminal", pu.os.slot._term is newer, True)
+        pu._terminal = lambda: vt
         pu.os = FakeOs(None)
         check("re-attaches a detached screen", pu._install_screen(), True)
         check("wrapper in the empty slot", getattr(pu.os.slot, "_cp437_screen", False), True)
@@ -274,7 +280,7 @@ def test_install_screen():
         check("foreign terminal left alone", pu._install_screen(), False)
         check("foreign restored", pu.os.slot is other, True)
     finally:
-        pu.os, pu._TERM = saved
+        pu.os, pu._terminal = saved
 
 
 # time
