@@ -2,7 +2,7 @@
 
 ## What this project is
 
-A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2W), meant to be used standalone with the device's keyboard and screen: a launcher (`menu.py`, opened by `main.py`) plus Wi-Fi management, AI chat (OpenRouter or a local server), RSS/Miniflux news, clock/NTP, notes/todo, weather, scientific calculator, WAV player, synthesizer and system status.
+A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2W), meant to be used standalone with the device's keyboard and screen: a launcher (`menu.py`, opened at power-on by the `default_style.py` hook) plus Wi-Fi management, AI chat (OpenRouter or a local server), RSS/Miniflux news, clock/NTP, notes/todo, weather, scientific calculator, WAV player, synthesizer, file manager, apps from the SD card, Snake and system status.
 
 ## Target hardware
 
@@ -17,7 +17,13 @@ A modular MicroPython toolkit for the **PicoCalc** hardware (Raspberry Pi Pico 2
 ClockworkPi ships MicroPython built on [PicoCalc-micropython-driver](https://github.com/zenodante/PicoCalc-micropython-driver). The latest `micropython_pico2w.uf2` (2025-10-30) is MicroPython 1.27.0-preview:
 
 - `boot.py` starts display, keyboard, SD (`/sd`) and speakers, then `os.dupterm()`s the screen terminal. The 2025-10-30 build freezes `boot.py` and `main.py` in the firmware; older driver builds keep them on flash (never delete `boot.py` there).
-- MicroPython runs a frozen `main.py` before one on flash (`shared/runtime/pyexec.c`, `pyexec_file_if_exists`), so the toolkit's `main.py` can only run on firmwares without a frozen one (inferred from that code, not tried); `import go` opens the launcher everywhere.
+- MicroPython runs a frozen `main.py` before one on flash (`shared/runtime/pyexec.c`, `pyexec_file_if_exists`), so the toolkit's `main.py` can only run on firmwares without a frozen one (inferred from that code, not tried); `import go` opens the launcher everywhere. The frozen `main.py` is empty.
+- Auto-start: the frozen `boot.py` imports `pye` (and through it `default_style`) before it builds the keyboard, and a flash module shadows a frozen one in normal imports. `default_style.py` re-exports the frozen colours and, when imported within `COLD_BOOT_MS` of power-on (measured: ~145 ms) with `go.py` present, wraps `PicoKeyboard.__init__` once to queue `import go\r` in `hardwarekeyBuf`. Recovery: `mpremote resume rm :default_style.py`.
+- After a soft reset the stock terminal is back (no `pico_utils` wrapper), and `mpremote`'s raw-paste handshake detaches it mid-command (`unexpected read during raw paste: b'd'`, the start of dupterm's error): use `mpremote resume ...`, never the default soft reset.
+- The firmware's Ctrl+U screenshot (`vt.screencapture`) reads `display.buffer` (never set) and `memoryview.cast` (absent): it raised from `readinto()`, crashing whatever read keys or detaching the screen. `pico_utils._fix_screenshot()` supplies both; screenshots land in `/sd/screen_<ticks>.bmp`.
+- `os.statvfs('/sd')` scans the whole FAT on its first call: over a minute on a 32 GB card. Never call it from the UI.
+- Scroll overflow (`vtterminal.c` `scroll()`): it does `YP++`, redraws the whole screen, then clamps `YP`; the 250 ms cursor-blink IRQ (`dispCursor`) can draw/erase the cursor at row 41 in between, 8 pixel rows past the framebuffer. The SD driver's `dummybuf` (0xFF filler sent during reads) sits 192 bytes after it: zeros there desynced the card (EIO, then "no SD card" until power-off). `pico_utils._set_margins()` sets DECSTBM `1;39` at attach and on every `clear_screen()` (measured: 9 bytes zeroed per 150 scrolled lines before, 0 in 300 after). Never move the cursor to row 40: a line feed from there overflows the same way. Residual: `import pico_utils` typed at a full stock REPL keeps the cursor on row 40 (DECSC/DECRC around DECSTBM), so the next Enter is one unprotected line feed; `import go` clears the screen first and is safe. Before any toolkit import (after a soft reset) every scroll is unprotected.
+- Drawing costs ~0.23 ms per character in `vtterminal.printChar`, escape bytes included (~4000 chars/s): build a screen once, repaint only the rows that change, avoid colour spans in hot paths. `to_cp437` is a few `replace()` calls, not a per-character loop.
 - With the Pico on USB power only (PicoCalc switched off), the keyboard MCU answers I2C reads with `EIO`; the driver raises it from `vt.readinto()` and dupterm detaches the screen. `_ScreenTerm.readinto()` swallows it.
 - The same `vt.write()` decode also fails on the raw-paste handshake bytes (`R\x01\x80\x00`) that `mpremote` and Thonny send: connecting a host tool detaches the stock terminal (screen and keyboard dead until reset). With `pico_utils` imported the wrapper takes them as `?`; `import pico_utils` (or `import go`) also re-attaches a terminal that was already detached.
 - The terminal is 53x40 characters (6x8 font). It draws each character as the CP437 glyph of its code: no Unicode, so `à` shows as `α`.
@@ -62,6 +68,12 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 | `menu.py` | Launcher, one key per app | No | No |
 | `go.py` | `import go` opens the launcher | No | No |
 | `main.py` | Opens the launcher at boot (firmwares without a frozen `main.py`) | No | No |
+| `default_style.py` | Boot hook: opens the launcher at power-on on the official firmware | No | No |
+| `files.py` | File manager: view, edit (firmware's pye), run, delete | No | No |
+| `apps.py` | Lists and runs `.py` apps from `/sd/apps` (or `/apps`) | No | No |
+| `snake.py` | Snake game | No | Yes (speaker blip) |
+
+`sd/apps/hello.py` is SD card content (a sample app), not a module: it goes to `/sd/apps/` on the card.
 
 ## Coding conventions
 
@@ -70,7 +82,8 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 - **Module version:** Each file has a `MODULE_VERSION` constant (or variant like `WIFI_MANAGER_VERSION`). Format: `"YYYY-MM-DD.N"` (e.g., `"2026-03-28.2"`).
 - **Standard methods:** Every module must implement `ver()`, `help()`, and `h()` (short alias for help).
 - **Display constants:** import `DISPLAY_WIDTH` and `PAGE_LINES` from `pico_utils` (detected at import); never redefine them locally. Output must fit `DISPLAY_WIDTH`.
-- **Keys:** navigation uses `pico_utils.read_key()` / `poll_key()` / `wait_key()` (single keys, arrows as `"up"`...); `input()` only for free text; `read_line(mask="*")` for secrets; any `read_line` prompt says "Enter".
+- **Keys:** navigation uses `pico_utils.read_key()` / `poll_key()` / `wait_key()` (single keys, arrows as `"up"`...); `input()` only for free text; `read_line(mask="*")` for secrets; any `read_line` prompt says "Enter". Lists use `pick()` (returns `(key, index)`) or `select_list()`.
+- **USB host takeover:** with the PicoCalc terminal present, keys come only from its keyboard; input on USB serial raises `pico_utils.HostTakeover` (a `BaseException`) so mpremote/Thonny get the REPL at once. Never catch `BaseException` or use bare `except:` in app code: it would swallow the handover.
 - **Look:** decoration only through `pico_utils.paint()` / `title_bar()` / `key_bar()` / `bar()` (16-colour palette via `38;5;n`, every span resets). Never colour text that `wrap_text` measures or that tests compare: wrap first, paint after (`preview_print(fg=...)`). Box/block/arrow glyphs map to CP437 in the screen writer.
 - **Terminal lookup:** `pico_utils._terminal()` reads `picocalc.terminal` at each use (boot.py rebuilds it); `ensure_screen()` re-attaches the writer.
 - **Section headers in code:** Use `# ──` divider comments to separate logical sections.
@@ -98,6 +111,7 @@ These files are stored on the Pico's flash filesystem, not in the repo:
 - `/notes_data.json` — saved notes/todo items
 - `/weather_config.json` — location (lat, lon, name)
 - `/miniflux_config.json` — Miniflux URL + API key (optional)
+- `/snake.json` — Snake best score and sound flag
 
 ## Testing
 
@@ -105,7 +119,8 @@ To verify changes:
 
 1. Host checks for the pure logic (parsers, formatters, helpers), with both interpreters: `python3 tests/test_logic.py` and `micropython tests/test_logic.py` (MicroPython unix port: `brew install micropython`). Builtin modules can't be monkeypatched on MicroPython: stub through module attributes instead.
 2. Verify output fits the screen width by visual inspection
-3. On-device testing is the primary validation method
+3. On-device testing is the primary validation method. Keys can be injected without touching the device: `picocalc.keyboard.hardwarekeyBuf.extend(b"...")` (the deque holds 30). To drive the menu after `mpremote` disconnects, arm a `machine.Timer` one-shot that injects them (the alarm pool fits about a dozen timers next to Wi-Fi and the display; use one periodic timer for longer scripts). Inject `\x15` (Ctrl+U) to save a screenshot to `/sd`, or from a script `picocalc_system.screenshot_bmp(memoryview(picocalc.display), '/_shot.bmp')` (flash), copy it with `mpremote resume cp :_shot.bmp .` and convert with `sips -s format png`. Draw the screen from the same script (`menu._draw(0, menu._hints())`) instead of driving the launcher when possible.
+4. Connecting `mpremote` while the launcher runs makes it hand over (`REPL (USB host)` on screen); `machine.reset()` at the end of a session brings the launcher back.
 
 ## Build and deploy
 

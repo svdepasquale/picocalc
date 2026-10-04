@@ -1,17 +1,23 @@
 # PicoCalc Toolkit
 
-Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Synthesizer + System toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
+Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Synthesizer + Files + Apps + Snake + System toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
 
-- a launcher menu (`import go`): one key per app, `q` to the REPL
+- a launcher menu that opens at power-on: one key per app, `q` to the REPL
+- a file manager (view, edit with the firmware's editor, run, delete) and
+  an Apps list that runs any `.py` you drop in `/sd/apps`
 - single-key navigation (no Enter) in menus, viewers and pagers; arrows work
 - on the official PicoCalc firmware the toolkit uses the whole 53x40 screen
   and shows accented text correctly (see "Screen" below)
 - every module still works from the REPL with short aliases
 
 ## Files
+- `default_style.py` → opens the launcher at power-on on the official firmware (see "Launcher")
 - `go.py` → `import go` opens the launcher
 - `main.py` → opens the launcher at boot where the firmware has no frozen `main.py`
 - `menu.py` → launcher: one key per app
+- `files.py` → file manager for flash and the SD card
+- `apps.py` → runs the `.py` files in `/sd/apps` (or `/apps` on flash)
+- `snake.py` → Snake, best score kept on flash
 - `pico_utils.py` → shared display/keys/IO utilities (used by other modules)
 - `wifi_manager.py` → connect logic + interactive setup
 - `openrouter_ai.py` → OpenRouter API client + compact chat output
@@ -25,6 +31,7 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Sy
 - `synthesizer.py` → tone/note/sequence synthesizer with piano interactive mode
 
 Copy the `.py` files of the repo root to the Pico root (`tests/` stays on the computer).
+`sd/apps/hello.py` is a sample app: copy it to `/sd/apps/` on the card.
 
 Data files created automatically:
 - `/wifi_credentials.json` → saved Wi-Fi networks
@@ -34,27 +41,44 @@ Data files created automatically:
 - `/notes_data.json` → saved notes/todo items
 - `/weather_config.json` → location (lat, lon, name)
 - `/miniflux_config.json` → Miniflux URL + API key (optional)
+- `/snake.json` → Snake best score and sound setting
 
 ## Launcher (standalone use)
-Type `import go` at the REPL (it works again after leaving the menu):
+It opens by itself when the PicoCalc is switched on; from the REPL,
+`import go` opens it again:
 
 ```
-1 WiFi   2 AI chat   3 News   4 Weather   5 Notes
-6 Calculator   7 Synth piano   8 Clock   9 System   q REPL
+1 WiFi   2 AI chat   3 News   4 Weather   5 Notes   6 Calculator
+7 Synth piano   8 Clock   9 System   0 Files   a Apps   s Snake
 ```
 
-- a number opens an app; ↑/↓ and Enter work too
+- an app's key opens it; ↑/↓ and Enter work too
+- under the list a panel says what the highlighted app does and its keys
 - each app has its own one-key sub-menu (keys shown in yellow); `q`/Esc goes back
 - the title bar shows time, Wi-Fi and battery; some apps show a hint
   (Wi-Fi state, AI model, weather city, open notes)
 - at start it joins a saved Wi-Fi network (`q` skips) and sets the clock
 - `q` leaves to the REPL; `import go` reopens it
+- `mpremote` or Thonny connecting over USB also leaves to the REPL, so
+  they get it at once (the screen says `REPL (USB host)`)
 
+### How it opens at power-on
 The official ClockworkPi firmware freezes its own `boot.py` and `main.py`
 inside the firmware, and MicroPython runs a frozen `main.py` before any
-`main.py` on flash, so the toolkit's `main.py` never runs there. On a
-firmware without a frozen `main.py` the one on flash should run and open
-the launcher (that follows from MicroPython's `pyexec.c`; not tried).
+`main.py` on flash, so the toolkit's `main.py` never runs there. But the
+frozen `boot.py` imports `default_style` (the editor's colours), and a file
+on flash wins over a frozen module of the same name. The toolkit's
+`default_style.py` passes the colours through and, on a cold start (the
+first 5 seconds after power-on or reset) with `go.py` installed, puts
+`import go` + Enter in the keyboard buffer: the REPL runs it as if typed.
+Soft resets (Ctrl+D, `mpremote`) leave the REPL alone.
+
+To go back to the stock REPL at power-on, delete the hook:
+`mpremote resume rm :default_style.py`.
+
+On a firmware without a frozen `main.py` the toolkit's `main.py` should
+open the launcher instead (that follows from MicroPython's `pyexec.c`;
+not tried).
 
 ## Screen
 On the official PicoCalc firmware `pico_utils` reads the terminal size
@@ -68,6 +92,20 @@ detach the screen and keyboard until reset. `pico_utils` replaces that
 writer with one that reports bytes and maps accented letters to their
 CP437 glyphs (letters CP437 lacks, like `È`, become plain ASCII). This
 covers everything printed, the REPL included.
+
+Two more firmware bugs it works around once loaded (the launcher loads it
+at power-on):
+- scrolling the terminal could write past the end of the screen's memory,
+  into the SD card driver's buffer: SD errors (`EIO`, "timeout waiting for
+  response", then "no SD card" until the PicoCalc is switched off and on).
+  The toolkit keeps the last screen row out of the scroll region, so the
+  REPL scrolls 39 rows instead of 40.
+- Ctrl+U, the firmware's screenshot key, crashed whatever was reading keys
+  (at the REPL it detached the screen). It now saves the screen to
+  `/sd/screen_<number>.bmp`.
+
+The terminal draws about 4000 characters a second, so screens are drawn
+once and moves repaint only what changes.
 
 ## Look
 Colours (the terminal's 16-colour palette), a title bar with time, Wi-Fi
@@ -429,8 +467,9 @@ Notes:
 1. Upload the `.py` files of the repo root to the Pico root (not `tests/`),
    e.g. `mpremote cp *.py :` (with the PicoCalc switched on: on USB power
    alone its keyboard controller is off and answers I2C errors).
-2. `import go` opens the launcher. Press `1`, then `c` to pick a Wi-Fi
-   network; the clock is set from NTP once connected.
+2. Switch the PicoCalc off and on: the launcher opens (or type `import go`).
+   Press `1`, then `c` to pick a Wi-Fi network; the clock is set from NTP
+   once connected, and at later starts the launcher joins it by itself.
 3. `8` (Clock) → `z`: UTC offset `1` and `y` for EU summer time (Italy).
 
 ## Synthesizer
@@ -488,6 +527,56 @@ Troubleshooting:
 - PWM produces square waves only; for other waveforms use I2S mode with external DAC
 - `q`/Esc exits piano mode and clears the screen
 
+## File manager
+`0` in the launcher, or `import files; files.browse()`. It starts at the
+flash root, where `sd/` is the SD card.
+
+- ↑/↓ choose, Enter (or →) opens a folder or shows a text file, ← (or
+  Backspace) goes up, `q` back to the launcher
+- `e` edits the file in the firmware's editor (pye): Ctrl+S then Enter
+  saves, Esc or Ctrl+Q quits. Files over 32 KB are refused: the editor
+  keeps the whole file in RAM
+- `r` runs a `.py` file the way the Apps list does
+- `d` deletes a file or an empty folder (asks `y`)
+- `n` makes a new file (opens the editor), `m` a new folder
+- the viewer shows the first 32 KB, a page per key (Space/↓ next, ↑ back);
+  binary files only show their size
+
+It never asks the SD card for its free space: on a 32 GB card the first
+`os.statvfs('/sd')` scans the whole FAT and takes over a minute.
+
+Commands:
+- `files.browse('/sd')` / `files.b()` → browser
+- `files.view('/notes_data.json')` / `files.v()` → viewer
+- `files.edit('/sd/apps/new.py')` / `files.e()` → editor
+
+## Apps from the SD card
+`a` in the launcher lists every `.py` file in `/sd/apps` (and `/apps` on
+flash); Enter or the row's number runs it as `__main__`. When it ends (or
+on `sys.exit()`, Ctrl+C or an error, whose traceback stays on screen) a
+key brings the list back, and the modules it imported are unloaded.
+
+A header in the first five lines names the app:
+
+```python
+# picocalc-app: Name | what it does
+```
+
+The three-field form `Name | Category | what it does` works too. Without a
+header the file name is used. An app can import the toolkit
+(`pico_utils`, `synthesizer`...) and files next to it in its folder.
+`sd/apps/hello.py` in this repo is a starting point.
+
+Commands:
+- `apps.launcher()` / `apps.l()` → the list
+- `apps.run_app('/sd/apps/hello.py')` / `apps.r()` → run one file
+- `apps.ls()` → print what was found
+
+## Snake
+`s` in the launcher, or `import snake; snake.play()`. Arrows or WASD
+steer, `p` pauses, `m` turns the sound off and on, `q` quits. Each food
+speeds it up; the best score is kept in `/snake.json`.
+
 ## Startup files on PicoCalc
 `boot.py` starts the screen, keyboard, SD card (`/sd`) and speakers. The
 official ClockworkPi firmware (2025-10-30 build) keeps it frozen inside the
@@ -511,6 +600,8 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - If synthesizer makes no sound: run `sy.use_pwm(True)` then `sy.tone(440, 300)` (built-in speakers).
 - If the speakers stay silent: try `sy.set_pwm_pin(28, 27)` (some official ClockworkPi sources put the left channel on GP28).
 - If screen and keyboard stop responding after Thonny or `mpremote` connected (or with the PicoCalc switched off): the firmware's terminal detached itself. `import go` from USB, or a reset, brings it back; once the toolkit is loaded it no longer happens.
+- If the launcher does not open at power-on: check that `default_style.py` and `go.py` are on the Pico (`import os; os.listdir()`). It only opens on a cold start, not after Ctrl+D or an `mpremote` soft reset.
+- After `mpremote`/Thonny took over, the PicoCalc is at the REPL: `import go`, or switch it off and on.
 - Old interactive UI stays on screen after exit: this is fixed in version 2026-03-28.3 (clear on exit).
 
 ## Known limitations
@@ -524,6 +615,9 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 ## Quick reference (all aliases)
 ```
 import menu                # menu.run()
+import files               # files.b() files.v(path) files.e(path)
+import apps                # apps.l() apps.r(path) apps.ls()
+import snake               # snake.p()
 import wifi_manager as w   # w.ac() w.acs() w.st() w.saved()
 import openrouter_ai as ai # ai.ask() ai.chat() ai.v()
 import rss_news as n       # n.l() n.r(1) n.v(1) n.f() n.mf()
@@ -537,5 +631,5 @@ import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-04.2` for the modules
-changed in the standalone round, `2026-10-04.1` for `weather` and `menu`.
+Check on device with `<module>.ver()`: `2026-10-04.1` for `files`, `apps`
+and `snake`, `2026-10-04.5` for `menu`, `2026-10-04.9` for `pico_utils`.
