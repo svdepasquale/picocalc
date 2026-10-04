@@ -3,11 +3,12 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import http_request as _http_request
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-06-06.1"
+MODULE_VERSION = "2026-10-04.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -24,15 +25,22 @@ WMO_CODES = {
     51: "Light drizzle",
     53: "Drizzle",
     55: "Heavy drizzle",
+    56: "Frz drizzle",
+    57: "Heavy frz drizzle",
     61: "Light rain",
     63: "Rain",
     65: "Heavy rain",
+    66: "Freezing rain",
+    67: "Heavy frz rain",
     71: "Light snow",
     73: "Snow",
     75: "Heavy snow",
+    77: "Snow grains",
     80: "Light showers",
     81: "Showers",
     82: "Heavy showers",
+    85: "Snow showers",
+    86: "Heavy snow shwrs",
     95: "Thunderstorm",
     96: "T-storm+hail",
     99: "T-storm+hail",
@@ -127,7 +135,7 @@ def set_city(name):
     print("Looking up:", _clip(city, 24))
     response = None
     try:
-        response = requests.get(url)
+        response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
             print("HTTP:", status)
@@ -191,14 +199,16 @@ def now():
 
     lat, lon, name = _get_location()
     label = _location_label(name, lat, lon)
-    url = "{}?latitude={}&longitude={}&current_weather=true".format(API_URL, lat, lon)
+    url = "{}?latitude={}&longitude={}&current_weather=true&timezone=auto".format(
+        API_URL, lat, lon
+    )
 
     print("Weather>", label)
     response = None
     start = _ticks_ms()
 
     try:
-        response = requests.get(url)
+        response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
             print("HTTP:", status)
@@ -272,7 +282,7 @@ def forecast(days=3):
     start = _ticks_ms()
 
     try:
-        response = requests.get(url)
+        response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
             print("HTTP:", status)
