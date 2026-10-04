@@ -2,11 +2,15 @@ import gc
 import os
 import time
 
+import pico_utils as _pu
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
 from pico_utils import PAGE_LINES, battery as _battery
+from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
+from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
+KEY_LOG = "keylog.txt"
 _IMPORT_TICKS = ticks_ms()
 
 
@@ -130,18 +134,107 @@ def gc_run():
     return after
 
 
+def _uptime_text():
+    if hasattr(time, "ticks_ms"):
+        ms = time.ticks_ms()
+    else:
+        ms = ticks_diff(ticks_ms(), _IMPORT_TICKS)
+    m = ms // 60000
+    return "{}h {}m".format(m // 60, m % 60)
+
+
+def _level_color(fraction):
+    # usage bars: green while there is room, then yellow, then red
+    if fraction < 0.7:
+        return GREEN
+    return YELLOW if fraction < 0.9 else RED
+
+
 def info():
-    screen_header("System Status")
-    ram()
-    print("---")
-    flash()
-    print("---")
-    uptime()
-    print("---")
-    ip()
-    print("---")
-    freq()
-    bat()
+    """Dashboard: RAM, flash, battery, uptime, network, CPU."""
+    screen_header("System")
+    gc.collect()
+    free = gc.mem_free()
+    used = gc.mem_alloc()
+    frac = used / (free + used) if free + used else 0
+    print("RAM    {}  {} free".format(_bar(frac, 16, _level_color(frac)), format_bytes(free)))
+    try:
+        st = os.statvfs("/")
+        total = st[0] * st[2]
+        ffree = st[0] * st[3]
+        frac = (total - ffree) / total if total else 0
+        print("Flash  {}  {} free".format(_bar(frac, 16, _level_color(frac)), format_bytes(ffree)))
+    except Exception:
+        print("Flash  n/a")
+    bat = _battery()
+    if bat is not None:
+        pct, charging = bat
+        colour = GREEN if pct > 40 else (YELLOW if pct > 15 else RED)
+        print("Batt   {}  {}%{}".format(_bar(pct / 100, 16, colour), pct, " charging" if charging else ""))
+    print("Up     {}".format(_uptime_text()))
+    try:
+        import network
+
+        w = network.WLAN(network.STA_IF)
+        print("WiFi   {}".format(w.ifconfig()[0] if w.isconnected() else "off"))
+    except Exception:
+        print("WiFi   n/a")
+    try:
+        import machine
+
+        print("CPU    {} MHz".format(machine.freq() // 1000000))
+    except Exception:
+        pass
+    return True
+
+
+def keys(log=True):
+    """Key test: shows each key's raw bytes and the name read_key() gives it;
+    also appends them to keylog.txt. q quits."""
+    screen_header("Key test")
+    print("Press keys (arrows too). q quits.")
+    print(_paint("raw bytes        name", GREY))
+    out = None
+    if log:
+        try:
+            out = open(KEY_LOG, "a")
+        except OSError:
+            out = None
+    try:
+        while True:
+            raw = [_pu._key_byte()]
+            while True:
+                more = _pu._key_byte(40)
+                if more is None:
+                    break
+                raw.append(more)
+            rest = raw[1:]
+
+            def next_byte(timeout_ms=None):
+                return rest.pop(0) if rest else None
+
+            try:
+                name = _pu._decode_key(raw[0], next_byte)
+            except KeyboardInterrupt:
+                name = "ctrl-c"
+            line = "{:<16} {}".format(" ".join("%02x" % b for b in raw), repr(name))
+            print(line)
+            if out:
+                out.write(line + "\n")
+                out.flush()
+            if name in ("q", "Q"):
+                break
+    finally:
+        if out:
+            out.close()
+    return True
+
+
+def colors():
+    """The terminal's 16 colours, numbered (check the palette)."""
+    screen_header("Colours")
+    for n in range(16):
+        print("{:>2} {} {}".format(n, _paint("\u2588" * 10, n), _paint(" sample ", BLACK if n in (7, 15) else BWHITE, n)))
     return True
 
 
@@ -158,6 +251,8 @@ def help():
     print("uptime()      Time since boot")
     print("ip()          Network info")
     print("bat()         Battery level")
+    print("keys()        Key test (keylog.txt)")
+    print("colors()      Colour palette")
     print("freq()        CPU frequency")
     print("ls(path)      List directory")
     print("gc_run()      Run GC + stats")
