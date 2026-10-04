@@ -406,7 +406,9 @@ def sleep_ms(ms):
 # ── keys ────────────────────────────────────────
 # Single keypresses, no Enter. The PicoCalc terminal's readinto() never
 # blocks and has no ioctl (select() can't see it), so it is polled
-# directly; USB serial goes through select on stdin.
+# directly. USB serial is the keyboard only where there is no PicoCalc
+# terminal (host tests, a bare Pico); with one, input on USB means a host
+# tool wants the REPL.
 
 _KEY_BUF = bytearray(1)
 _STDIN_POLL = None
@@ -414,16 +416,15 @@ _CSI_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left", "H": "home", "F"
 _TILDE_KEYS = {"1": "home", "2": "insert", "3": "del", "4": "end", "5": "pgup", "6": "pgdn", "7": "home", "8": "end"}
 
 
-def _poll_byte():
-    # One pending byte from the PicoCalc keyboard or USB serial, or None.
+class HostTakeover(BaseException):
+    # mpremote/Thonny wrote to the USB REPL while the PicoCalc screen is the
+    # console. Not an Exception or KeyboardInterrupt, so the toolkit's own
+    # except clauses let it through to the launcher, which hands over.
+    pass
+
+
+def _stdin_poll():
     global _STDIN_POLL
-    term = _terminal()
-    if term is not None:
-        try:
-            if term.readinto(_KEY_BUF):
-                return _KEY_BUF[0]
-        except OSError:  # keyboard MCU unpowered or busy
-            pass
     if _STDIN_POLL is None:
         try:
             import select
@@ -433,7 +434,25 @@ def _poll_byte():
             _STDIN_POLL.register(sys.stdin, select.POLLIN)
         except Exception:
             _STDIN_POLL = False
-    if _STDIN_POLL and _STDIN_POLL.poll(0):
+    return _STDIN_POLL
+
+
+def _poll_byte():
+    # One pending key byte, or None. Raises HostTakeover when USB serial has
+    # input while the PicoCalc keyboard is the key source: reading it as keys
+    # would eat the bytes mpremote/Thonny send to reach the REPL.
+    term = _terminal()
+    poll = _stdin_poll()
+    if term is not None:
+        try:
+            if term.readinto(_KEY_BUF):
+                return _KEY_BUF[0]
+        except Exception:  # keyboard MCU unpowered or busy, firmware bugs
+            pass
+        if poll and poll.poll(0):
+            raise HostTakeover
+        return None
+    if poll and poll.poll(0):
         import sys
 
         try:
@@ -561,6 +580,89 @@ def _read_digits(first):
             digits += key
             print(key, end="")
     return int(digits) if digits else None
+
+
+_PICK_TOP = 3  # screen row of the first list row (title bar, blank line)
+
+
+def _pick_row(labels, hints, i, selected):
+    num = str(i + 1) if i < 9 else " "
+    text = " {} {:<{}}{}".format(
+        num, clip(labels[i], DISPLAY_WIDTH - 16), DISPLAY_WIDTH - 15, clip(hints[i], 12)
+    )
+    if selected:
+        return paint("{:<{}}".format(text, DISPLAY_WIDTH)[:DISPLAY_WIDTH], BLACK, BCYAN)
+    return " " + paint(num, BYELLOW) + text[2:]
+
+
+def _pick_title(title, pos, count):
+    return "{}  {}/{}".format(title, pos + 1, count) if count else title
+
+
+def pick(title, labels, hints=None, footer=None, pos=0):
+    """List screen: arrows (or j/k) move the highlight, 1-9 picks that row.
+    Returns (key, index) for any other key ("enter" for a digit), index None
+    when the list is empty. The caller acts on the key. Long lists scroll.
+    footer: key_bar pairs, or a tuple of such rows."""
+    count = len(labels)
+    hints = hints or [""] * count
+    footer = footer or (("\u2191\u2193", "choose"), ("Enter", "open"), ("q", "back"))
+    if not isinstance(footer[0][0], tuple):
+        footer = (footer,)
+    rows = max(3, PAGE_LINES - 4)
+    pos = max(0, min(pos, count - 1))
+    top = None
+    end_row = 1
+    while True:
+        if top is None or not top <= pos < top + rows:
+            top = max(0, min(pos - rows // 2, count - rows))
+            screen_header(_pick_title(title, pos, count))
+            if not count:
+                print(paint("  (empty)", GREY))
+            for i in range(top, min(top + rows, count)):
+                print(_pick_row(labels, hints, i, i == pos))
+            print(paint("\u2500" * DISPLAY_WIDTH, GREY))
+            for row in footer:
+                key_bar(row)
+            end_row = _PICK_TOP + max(1, min(rows, count - top)) + 1 + len(footer)
+        try:
+            key = read_key()
+        except KeyboardInterrupt:
+            return "esc", (pos if count else None)
+        old = pos
+        if key in ("down", "j"):
+            pos = min(pos + 1, count - 1) if count else 0
+        elif key in ("up", "k"):
+            pos = max(pos - 1, 0)
+        elif key and len(key) == 1 and "1" <= key <= "9":
+            if int(key) <= count:
+                return "enter", int(key) - 1
+            continue
+        else:
+            return key, (pos if count else None)
+        if pos != old and top <= pos < top + rows:
+            # Same window: repaint the two rows and the counter in place,
+            # then park the cursor under the footer for the caller's prompts.
+            print("\x1b[1;1H" + title_bar(_pick_title(title, pos, count)), end="")
+            for i in (old, pos):
+                print(
+                    "\x1b[{};1H\x1b[K{}".format(_PICK_TOP + i - top, _pick_row(labels, hints, i, i == pos)),
+                    end="",
+                )
+            print("\x1b[{};1H".format(end_row), end="")
+
+
+def select_list(title, labels, hints=None, footer=None):
+    """Pick one of `labels` with arrows + Enter or its number (1-9); returns
+    the index, or None on q/Esc. Long lists scroll."""
+    pos = 0
+    while labels:
+        key, pos = pick(title, labels, hints, footer, pos)
+        if key in ("enter", "right"):
+            return pos
+        if key in _QUIT_KEYS or key == "left":
+            return None
+    return None
 
 
 def browse_items(
