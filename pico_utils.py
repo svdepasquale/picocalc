@@ -12,7 +12,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -133,7 +133,12 @@ class _ScreenTerm(_IOBase):
         return len(buf)
 
     def readinto(self, buf):
-        return self._term.readinto(buf)
+        # The keyboard MCU answers EIO while the PicoCalc is off (Pico on USB
+        # power only); raising here would make dupterm detach the screen.
+        try:
+            return self._term.readinto(buf)
+        except OSError:
+            return None
 
 
 def _install_screen():
@@ -312,8 +317,12 @@ _TILDE_KEYS = {"1": "home", "2": "insert", "3": "del", "4": "end", "5": "pgup", 
 def _poll_byte():
     # One pending byte from the PicoCalc keyboard or USB serial, or None.
     global _STDIN_POLL
-    if _TERM is not None and _TERM.readinto(_KEY_BUF):
-        return _KEY_BUF[0]
+    if _TERM is not None:
+        try:
+            if _TERM.readinto(_KEY_BUF):
+                return _KEY_BUF[0]
+        except OSError:  # keyboard MCU unpowered or busy
+            pass
     if _STDIN_POLL is None:
         try:
             import select
