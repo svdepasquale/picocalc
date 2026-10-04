@@ -776,6 +776,7 @@ def mf(limit=MF_LIMIT):
         limit = MF_LIMIT
 
     print("Miniflux> unread")
+    _LAST_ITEMS = []  # a failed fetch must not leave older RSS items behind
     while True:
         try:
             status, data = _mf_fetch(config, requests, limit)

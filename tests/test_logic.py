@@ -512,6 +512,12 @@ def test_miniflux_large_and_401():
         rss_news._http_module = lambda: req
         check("401 stops", rss_news.mf(), 0)
         check("no retry on 401", len(req.calls), 1)
+        rss_news._LAST_ITEMS = [{"title": "old RSS item"}]
+        huge = b'{"entries": [' + b"x" * (rss_news.MF_MAX_BYTES + 10) + b"]}"
+        req = ScriptedRequests([HttpResponse(200, huge, 4096), HttpResponse(200, huge, 4096)])
+        rss_news._http_module = lambda: req
+        check("too large", rss_news.mf(), 0)
+        check("no stale RSS items left", rss_news._LAST_ITEMS, [])
 
     _with_miniflux(run)
 
