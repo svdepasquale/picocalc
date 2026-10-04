@@ -4,7 +4,7 @@ import math
 from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen, screen_header
 
 
-MODULE_VERSION = "2026-03-28.3"
+MODULE_VERSION = "2026-10-04.1"
 DISPLAY_WIDTH = 32
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
@@ -24,12 +24,39 @@ def _store(expr, result):
         del _HISTORY[0]
 
 
+def _fit_int(value, width):
+    # Too many digits: scientific notation, never silently cut digits.
+    text = str(value)
+    if len(text) <= width:
+        return text
+    sign = "-" if value < 0 else ""
+    digits = text[len(sign):]
+    exp = len(digits) - 1
+    keep = max(1, width - len(sign) - len(str(exp)) - 2)
+    head = int(digits[:keep])
+    if digits[keep] >= "5":
+        head += 1
+        if len(str(head)) > keep:
+            head //= 10
+            exp += 1
+    head = str(head)
+    mantissa = head[0] + ("." + head[1:] if len(head) > 1 else "")
+    return "{}{}e{}".format(sign, mantissa, exp)
+
+
+def _format_result(value, width=DISPLAY_WIDTH - 2):
+    if isinstance(value, float):
+        if math.isinf(value) or math.isnan(value):
+            return str(value)
+        if abs(value) < 1e15 and value == int(value):
+            value = int(value)
+    if isinstance(value, int):
+        return _fit_int(value, width)
+    return clip(str(value), width)
+
+
 def _print_result(expr, result):
-    if isinstance(result, float) and result == int(result) and abs(result) < 1e15:
-        display = str(int(result))
-    else:
-        display = str(result)
-    print("=", clip(display, DISPLAY_WIDTH - 2))
+    print("=", _format_result(result))
     _store(expr, result)
 
 
@@ -339,7 +366,7 @@ def history():
     lines = []
     for i, item in enumerate(_HISTORY, 1):
         expr = clip(item["expr"], 18)
-        res = clip(str(item["result"]), 10)
+        res = _format_result(item["result"], 10)
         lines.append("{}: {} = {}".format(i, expr, res))
     paged_lines(lines)
     return _HISTORY
