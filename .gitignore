@@ -35,3 +35,6 @@ Thumbs.db
 
 # host test scratch files
 tests/_tmp_*
+
+# Claude Code personal settings (permission rules), never published
+.claude/settings.local.json
