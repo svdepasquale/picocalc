@@ -3,12 +3,10 @@ import os
 import time
 
 from pico_utils import clip, paged_print, paged_lines, preview_print, browse_items, format_bytes
-from pico_utils import screen_header
+from pico_utils import screen_header, poll_key, DISPLAY_WIDTH
 
 
-MODULE_VERSION = "2026-10-04.1"
-DISPLAY_WIDTH = 32
-PAGE_LINES = 8
+MODULE_VERSION = "2026-10-04.2"
 SUPPORTED_EXT = (".mp3", ".wav")
 DEFAULT_AUDIO_PIN = 28
 DEFAULT_VOLUME = 70
@@ -120,9 +118,10 @@ def scan(path=None):
         print("No audio files found.")
         return []
     print("Found {} file(s):".format(len(files)))
+    lines = []
     for i, f in enumerate(files, 1):
-        name = _track_name(f)
-        print("{}: {}".format(i, clip(name, DISPLAY_WIDTH - 4)))
+        lines.append("{}: {}".format(i, clip(_track_name(f), DISPLAY_WIDTH - 4)))
+    paged_lines(lines)
     return files
 
 
@@ -325,7 +324,14 @@ def _play_wav(filepath):
         view = memoryview(buf)
         remaining = int(info.get("data_size", 0) or 0)
         limit_to_data = remaining > 0
+        print("q/Esc stops")
+        chunks = 0
         while _PLAYING:
+            chunks += 1
+            # each key poll is an I2C read: check every 8 chunks
+            if chunks % 8 == 0 and poll_key() in ("q", "Q", "esc"):
+                print("Stopped.")
+                break
             if limit_to_data:
                 read_size = remaining if remaining < CHUNK_SIZE else CHUNK_SIZE
                 if read_size <= 0:
