@@ -214,6 +214,7 @@ def test_screen_term_bytes_and_cp437():
     check("bad byte shown as ?", vt.drawn[-1], "a?b")
     check("ascii untouched", pu.to_cp437("plain"), "plain")
     check("upper accent folded", pu.to_cp437("È €"), "E EUR")
+    check("left arrow folds, right maps", pu.to_cp437("←→"), "<\x1a")
 
 
 class EioVt(FakeVt):
@@ -567,6 +568,22 @@ def test_miniflux_large_and_401():
         rss_news._http_module = lambda: req
         check("falls back to 1", rss_news.mf(), 1)
         check("retry used limit=1", "limit=1" in req.calls[1][1], True)
+        # no 48 KB block free: retry with one entry in the smaller buffer
+        real_read = rss_news._read_capped
+
+        def tight_read(response, limit):
+            if limit > rss_news.MF_MIN_BYTES:
+                raise MemoryError("memory allocation failed")
+            return real_read(response, limit)
+
+        rss_news._read_capped = tight_read
+        req = ScriptedRequests([HttpResponse(200, _MF_BODY), HttpResponse(200, _MF_BODY)])
+        rss_news._http_module = lambda: req
+        try:
+            check("low memory falls back", rss_news.mf(), 1)
+            check("fallback asks for 1", "limit=1" in req.calls[1][1], True)
+        finally:
+            rss_news._read_capped = real_read
         req = ScriptedRequests([HttpResponse(401, b"{}")])
         rss_news._http_module = lambda: req
         check("401 stops", rss_news.mf(), 0)

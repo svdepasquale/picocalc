@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.5"
+MODULE_VERSION = "2026-10-04.6"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -94,6 +94,7 @@ _FOLDS = {
     "−": "-",
     "…": "...",
     "•": "*",
+    "←": "<",  # CP437 has it at 0x1B, which is ESC
     "\xa0": " ",
     "€": "EUR",
 }
@@ -213,17 +214,28 @@ def key_bar(pairs):
     print("  ".join(paint(key, BYELLOW) + " " + label for key, label in pairs))
 
 
+STATUS_TTL_MS = 20000
+_STATUS = [None, 0, False, None]  # read at, UTC offset, Wi-Fi up, battery
+
+
 def status_text():
-    # "12:34  WiFi  87%": time once the clock is set, Wi-Fi, battery
+    # "12:34  WiFi  87%": time once the clock is set, Wi-Fi, battery. Offset,
+    # Wi-Fi and battery (16 ms + I2C) are re-read every STATUS_TTL_MS only:
+    # viewers draw the title bar on every key.
+    now = ticks_ms()
+    if _STATUS[0] is None or ticks_diff(now, _STATUS[0]) > STATUS_TTL_MS:
+        _STATUS[0] = now
+        _STATUS[1] = utc_offset_hours()
+        _STATUS[2] = wifi_connected()
+        _STATUS[3] = battery()
     parts = []
     if clock_synced():
-        now = local_time()
-        parts.append("{:02d}:{:02d}".format(now[3], now[4]))
-    if wifi_connected():
+        t = local_time(_STATUS[1])
+        parts.append("{:02d}:{:02d}".format(t[3], t[4]))
+    if _STATUS[2]:
         parts.append("WiFi")
-    bat = battery()
-    if bat is not None:
-        parts.append("{}%{}".format(bat[0], "+" if bat[1] else ""))
+    if _STATUS[3] is not None:
+        parts.append("{}%{}".format(_STATUS[3][0], "+" if _STATUS[3][1] else ""))
     return "  ".join(parts)
 
 
