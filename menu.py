@@ -12,7 +12,7 @@ from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
 from pico_utils import BLACK, BCYAN, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-04.3"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 _FIRST_ROW = 3  # screen row of the first app (title bar, blank line)
@@ -219,7 +219,7 @@ def _clock():
 def _system():
     s = _load("sys_status")
     while True:
-        key = _choose("System", s.info, (("k", "key test"), ("c", "colours")))
+        key = _choose("System", lambda: s.info(False), (("k", "key test"), ("c", "colours")))
         if key is None:
             return
         if key == "k":
@@ -327,7 +327,7 @@ def _autoconnect():
     if not w.load_credentials():
         return
     _screen_header("PicoCalc")
-    print("Connecting Wi-Fi...  " + _paint("q", BYELLOW) + " skip")
+    print("Connecting Wi-Fi...  " + _paint("q", BYELLOW) + " skips while connecting")
     try:
         w.acs()
     except KeyboardInterrupt:

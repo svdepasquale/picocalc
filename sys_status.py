@@ -9,7 +9,7 @@ from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-04.4"
 KEY_LOG = "keylog.txt"
 _IMPORT_TICKS = ticks_ms()
 
@@ -150,9 +150,10 @@ def _level_color(fraction):
     return YELLOW if fraction < 0.9 else RED
 
 
-def info():
+def info(header=True):
     """Dashboard: RAM, flash, battery, uptime, network, CPU."""
-    screen_header("System")
+    if header:
+        screen_header("System")
     gc.collect()
     free = gc.mem_free()
     used = gc.mem_alloc()
