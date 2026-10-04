@@ -7,6 +7,7 @@ from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
+from pico_utils import http_request as _http_request
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
 
@@ -23,7 +24,8 @@ DEFAULT_SYSTEM_PROMPT = "Reply concise. Use short lines for a tiny 32-char displ
 DISPLAY_WIDTH = 32
 MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
-MODULE_VERSION = "2026-03-28.3"
+AI_TIMEOUT = 60  # non-streaming: the reply arrives only once generation ends
+MODULE_VERSION = "2026-10-04.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -336,7 +338,14 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
 
     response = None
     try:
-        response = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload))
+        response = _http_request(
+            requests,
+            "POST",
+            OPENROUTER_URL,
+            timeout=AI_TIMEOUT,
+            headers=headers,
+            data=json.dumps(payload),
+        )
         status = response.status_code
         try:
             body = response.json()
