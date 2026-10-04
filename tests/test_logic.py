@@ -8,7 +8,10 @@ import io
 import os
 import sys
 
-_HERE = __file__.rsplit("/", 1)[0] if "/" in __file__ else "."
+try:
+    _HERE = __file__.rsplit("/", 1)[0] if "/" in __file__ else "."
+except NameError:  # mpremote run: executed on the device, modules in /
+    _HERE = "."
 sys.path.insert(0, _HERE + "/..")
 
 import pico_utils as pu
@@ -213,6 +216,24 @@ def test_screen_term_bytes_and_cp437():
     check("upper accent folded", pu.to_cp437("È €"), "E EUR")
 
 
+class EioVt(FakeVt):
+    def readinto(self, buf):
+        raise OSError(5)
+
+
+def test_screen_term_survives_keyboard_eio():
+    term = pu._ScreenTerm(EioVt())
+    check("EIO read is no key", term.readinto(bytearray(1)), None)
+    saved = pu._TERM
+    try:
+        pu._TERM = EioVt()
+        pu._STDIN_POLL = False
+        check("poll survives EIO", pu._poll_byte(), None)
+    finally:
+        pu._TERM = saved
+        pu._STDIN_POLL = None
+
+
 def test_screen_term_print_path():
     # MicroPython's print(file=...) goes through mp_stream_write, the same
     # retry-on-short-write loop dupterm uses; CPython hands write() a str.
@@ -313,6 +334,9 @@ def test_parse_feed():
 
 def test_latest_pages_once():
     pages = []
+    saved_config = rss_news.CONFIG_FILE
+    rss_news.CONFIG_FILE = _TMP  # defaults, not a device's saved feeds
+    _rm(_TMP)
     saved = (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines)
     rss_news.check_wifi = lambda: True
     rss_news._http_module = lambda: object()
@@ -324,6 +348,8 @@ def test_latest_pages_once():
         count = rss_news.latest()
     finally:
         rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines = saved
+        rss_news.CONFIG_FILE = saved_config
+        _rm(_TMP)
     check("one paged call", len(pages), 1)
     check("item count", count, len(rss_news.DEFAULT_FEEDS))
     check("first line", pages[0][0], "[1] BBC World")
@@ -337,7 +363,7 @@ import scientific_calc as sc
 def test_format_result():
     check("small int", sc._format_result(42), "42")
     check("integral float", sc._format_result(3.0), "3")
-    check("2**100 fits 30", sc._format_result(2 ** 100), "1.2676506002282294014967032e30")
+    check("2**100 fits 30", sc._format_result(2 ** 100, 30), "1.2676506002282294014967032e30")
     check("30! no cut digits", sc._format_result(sc._calc_factorial(30), 10), "2.65253e32")
     check("negative big", sc._format_result(-(10 ** 40), 12), "-1.000000e40")
     check("round up carries", sc._format_result(99999999999, 8), "1.000e11")
@@ -374,10 +400,32 @@ class ChunkRaw:
         return len(piece)
 
 
+class LazyRaw:
+    # head + n filler bytes + tail, made on demand: no big test allocation
+    def __init__(self, head, fill, tail):
+        self.data = head + tail  # for json() on short bodies only
+        self.head, self.fill, self.tail = head, fill, tail
+        self.pos = 0
+
+    def readinto(self, buf):
+        size = len(self.head) + self.fill + len(self.tail)
+        n = min(len(buf), 4096, size - self.pos)
+        for i in range(n):
+            p = self.pos + i
+            if p < len(self.head):
+                buf[i] = self.head[p]
+            elif p < len(self.head) + self.fill:
+                buf[i] = 120
+            else:
+                buf[i] = self.tail[p - len(self.head) - self.fill]
+        self.pos += n
+        return n
+
+
 class HttpResponse:
-    def __init__(self, status, body=b"", chunk=64):
+    def __init__(self, status, body=b"", chunk=64, raw=None):
         self.status_code = status
-        self.raw = ChunkRaw(body, chunk)
+        self.raw = raw or ChunkRaw(body, chunk)
         self.closed = False
 
     def json(self):
@@ -503,8 +551,10 @@ def test_miniflux_fetch_and_mark():
 
 def test_miniflux_large_and_401():
     def run():
-        big = b'{"entries": [' + b"x" * (rss_news.MF_MAX_BYTES + 10) + b"]}"
-        req = ScriptedRequests([HttpResponse(200, big, 4096), HttpResponse(200, _MF_BODY)])
+        def big():
+            return HttpResponse(200, raw=LazyRaw(b'{"entries": [', rss_news.MF_MAX_BYTES + 10, b"]}"))
+
+        req = ScriptedRequests([big(), HttpResponse(200, _MF_BODY)])
         rss_news._http_module = lambda: req
         check("falls back to 1", rss_news.mf(), 1)
         check("retry used limit=1", "limit=1" in req.calls[1][1], True)
@@ -513,8 +563,7 @@ def test_miniflux_large_and_401():
         check("401 stops", rss_news.mf(), 0)
         check("no retry on 401", len(req.calls), 1)
         rss_news._LAST_ITEMS = [{"title": "old RSS item"}]
-        huge = b'{"entries": [' + b"x" * (rss_news.MF_MAX_BYTES + 10) + b"]}"
-        req = ScriptedRequests([HttpResponse(200, huge, 4096), HttpResponse(200, huge, 4096)])
+        req = ScriptedRequests([big(), big()])
         rss_news._http_module = lambda: req
         check("too large", rss_news.mf(), 0)
         check("no stale RSS items left", rss_news._LAST_ITEMS, [])
