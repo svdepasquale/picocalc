@@ -218,6 +218,11 @@ STATUS_TTL_MS = 20000
 _STATUS = [None, 0, False, None]  # read at, UTC offset, Wi-Fi up, battery
 
 
+def refresh_status():
+    # Next title bar re-reads Wi-Fi/battery/offset (after a connect, a zone change).
+    _STATUS[0] = None
+
+
 def status_text():
     # "12:34  WiFi  87%": time once the clock is set, Wi-Fi, battery. Offset,
     # Wi-Fi and battery (16 ms + I2C) are re-read every STATUS_TTL_MS only:

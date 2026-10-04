@@ -9,6 +9,7 @@ from pico_utils import key_bar as _key_bar, load_json as _load_json, paint as _p
 from pico_utils import read_key as _read_key, read_line as _read_line
 from pico_utils import screen_header as _screen_header, title_bar as _title_bar
 from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
+from pico_utils import refresh_status as _refresh_status
 from pico_utils import BLACK, BCYAN, BYELLOW, GREY
 
 
@@ -73,6 +74,7 @@ def _wifi():
             return
         if key == "c":
             w.ac()
+            _refresh_status()
             _wait_key()
         elif key == "s":
             w.saved()
@@ -214,6 +216,7 @@ def _clock():
                 _wait_key()
         elif key == "z":
             _set_zone(c)
+            _refresh_status()
 
 
 def _system():
@@ -334,6 +337,7 @@ def _autoconnect():
         pass
     except Exception as error:
         print("WiFi:", error)
+    _refresh_status()
 
 
 def run(connect=True):
