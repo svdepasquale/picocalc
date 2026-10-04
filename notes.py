@@ -1,5 +1,4 @@
 import gc
-import time
 
 from pico_utils import clip as _clip
 from pico_utils import paged_print as _paged_print
@@ -8,13 +7,14 @@ from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json
 from pico_utils import screen_header as _screen_header
+from pico_utils import local_time as _local_time, clock_synced as _clock_synced
 
 
 DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-10-04.1"
 
 _NOTES = None
 
@@ -38,8 +38,11 @@ def _ensure():
 
 
 def _ts():
+    # local time, and no stamp at all before the clock is set (it reads 2021-01-01)
     try:
-        t = time.gmtime()
+        if not _clock_synced():
+            return ""
+        t = _local_time()
         return "{:02d}-{:02d} {:02d}:{:02d}".format(t[1], t[2], t[3], t[4])
     except Exception:
         return ""

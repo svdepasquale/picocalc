@@ -1,12 +1,13 @@
 import time
 
 from pico_utils import load_json, save_json, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import CLOCK_CONFIG_FILE as CONFIG_FILE
+from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _local_time_at
+from pico_utils import clock_synced as _clock_synced
 
 
-CONFIG_FILE = "clock_config.json"
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-10-04.1"
 NTP_HOST = "pool.ntp.org"
-DEFAULT_UTC_OFFSET = 0
 MAX_NTP_RETRIES = 2
 
 _timer_start = None
@@ -24,8 +25,7 @@ def _save_config(config):
 
 
 def _get_offset():
-    config = _load_config()
-    return int(config.get("utc_offset", DEFAULT_UTC_OFFSET))
+    return _utc_offset_hours()
 
 
 def _fmt(t):
@@ -40,9 +40,12 @@ def _fmt_short(t):
 
 def _local_time():
     offset = _get_offset()
-    utc_secs = time.time()
-    local_secs = utc_secs + offset * 3600
-    return time.gmtime(local_secs), offset
+    return _local_time_at(offset), offset
+
+
+def _sync_hint():
+    if not _clock_synced():
+        print("Clock not set: run sync()")
 
 
 def set_utc_offset(hours):
@@ -97,6 +100,7 @@ def now():
     lt, offset = _local_time()
     label = "UTC" + ("{:+d}".format(offset) if offset else "")
     print(_fmt(lt), label)
+    _sync_hint()
     return lt
 
 
@@ -113,6 +117,7 @@ def date():
     label = "UTC" + ("{:+d}".format(offset) if offset else "")
     print("{} {:04d}-{:02d}-{:02d}".format(d, lt[0], lt[1], lt[2]))
     print(_fmt_short(lt), label)
+    _sync_hint()
     return lt
 
 
