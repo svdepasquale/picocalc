@@ -5,9 +5,9 @@ import time
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
 
 
-MODULE_VERSION = "2026-06-06.1"
+MODULE_VERSION = "2026-10-04.1"
 PAGE_LINES = 8
-_BOOT_TICKS = ticks_ms()
+_IMPORT_TICKS = ticks_ms()
 
 
 def ram():
@@ -40,7 +40,11 @@ def flash():
 
 
 def uptime():
-    ms = ticks_diff(ticks_ms(), _BOOT_TICKS)
+    if hasattr(time, "ticks_ms"):
+        # MicroPython ticks count from boot; wraps after ~12.4 days
+        ms = time.ticks_ms()
+    else:
+        ms = ticks_diff(ticks_ms(), _IMPORT_TICKS)
     s = ms // 1000
     m = s // 60
     h = m // 60
