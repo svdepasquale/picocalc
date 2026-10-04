@@ -6,7 +6,7 @@ from pico_utils import clip, paged_print, paged_lines, preview_print, browse_ite
 from pico_utils import screen_header
 
 
-MODULE_VERSION = "2026-03-28.2"
+MODULE_VERSION = "2026-10-04.1"
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 SUPPORTED_EXT = (".mp3", ".wav")
@@ -338,7 +338,7 @@ def _play_wav(filepath):
             if _VOLUME < 100 and info["bits"] == 16:
                 _scale_volume(buf, n)
             try:
-                audio.write(buf[:n])
+                audio.write(view[:n])  # buf[:n] copied 4 KB per chunk
             except Exception:
                 break
             if limit_to_data:
