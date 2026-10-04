@@ -22,13 +22,14 @@ CONFIG_FILE = "rss_feeds.json"
 MF_CONFIG_FILE = "miniflux_config.json"
 MF_LIMIT = 3
 MF_MAX_BYTES = 49152
+MF_MIN_BYTES = 16384  # retry size when no 48 KB block is free
 MAX_XML_BYTES = 26000
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-04.4"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -727,8 +728,8 @@ def _mf_items(data):
     return items
 
 
-def _mf_fetch(config, requests, limit):
-    # (status, parsed JSON); data None when the body exceeded MF_MAX_BYTES
+def _mf_fetch(config, requests, limit, cap=MF_MAX_BYTES):
+    # (status, parsed JSON); data None when the body exceeded `cap`
     url = "{}/v1/entries?status=unread&order=published_at&direction=desc&limit={}".format(
         config["url"], limit
     )
@@ -740,14 +741,14 @@ def _mf_fetch(config, requests, limit):
         status = response.status_code
         if status != 200:
             return status, None
-        buf, got = _read_capped(response, MF_MAX_BYTES)
+        buf, got = _read_capped(response, cap)
     finally:
         if response is not None:
             try:
                 response.close()
             except Exception:
                 pass
-    if got >= MF_MAX_BYTES:
+    if got >= cap:
         return status, None
     view = memoryview(buf)[:got]
     try:
@@ -777,9 +778,20 @@ def mf(limit=MF_LIMIT):
 
     print("Miniflux> unread")
     _LAST_ITEMS = []  # a failed fetch must not leave older RSS items behind
+    cap = MF_MAX_BYTES
     while True:
         try:
-            status, data = _mf_fetch(config, requests, limit)
+            status, data = _mf_fetch(config, requests, limit, cap)
+        except MemoryError:
+            if cap > MF_MIN_BYTES:
+                # fragmented heap: one entry in a smaller buffer
+                cap = MF_MIN_BYTES
+                limit = 1
+                gc.collect()
+                print("Low memory, fetching 1")
+                continue
+            print("Out of memory.")
+            return 0
         except Exception as error:
             print("Fetch err:", _clip(error, 24))
             return 0
