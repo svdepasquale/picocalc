@@ -10,6 +10,7 @@ from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
 
 MODULE_VERSION = "2026-10-04.2"
 NTP_HOST = "pool.ntp.org"
+NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
 
 _timer_start = None
@@ -96,8 +97,8 @@ def sync():
         pass
 
     ntptime.host = NTP_HOST
-    ntptime.timeout = 5
-    print("NTP sync...")
+    ntptime.timeout = NTP_TIMEOUT
+    print("NTP sync (up to {}s)...".format(NTP_TIMEOUT * MAX_NTP_RETRIES))
     for attempt in range(MAX_NTP_RETRIES):
         try:
             ntptime.settime()
