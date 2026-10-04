@@ -27,7 +27,7 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Sy
 - `notes.py` → persistent notes/todo with viewer
 - `weather.py` → current weather + forecast via Open-Meteo (free, no API key)
 - `scientific_calc.py` → scientific calculator with trig, log, conversions, history
-- `mp3_player.py` → audio file player with playlist and browser
+- `music.py` → WAV player on the speakers and headphone jack (PWM + DMA)
 - `synthesizer.py` → tone/note/sequence synthesizer with piano interactive mode
 
 Copy the `.py` files of the repo root to the Pico root (`tests/` stays on the computer).
@@ -49,7 +49,7 @@ It opens by itself when the PicoCalc is switched on; from the REPL,
 
 ```
 1 WiFi   2 AI chat   3 News   4 Weather   5 Notes   6 Calculator
-7 Synth piano   8 Clock   9 System   0 Files   a Apps   s Snake
+7 Synth piano   8 Clock   9 System   0 Files   m Music   a Apps   s Snake
 ```
 
 - an app's key opens it; ↑/↓ and Enter work too
@@ -417,51 +417,40 @@ Interactive mode:
 Full command list:
 - `sc.ver()` / `sc.help()` / `sc.h()`
 
-## MP3 Player
-Audio file player for WAV files via I2S output. Supports playlist management and a file browser.
+## Music
+`m` in the launcher, or `import music; music.player()`: plays WAV files from
+`/sd/music` (and the card's root) on the speakers or the headphone jack.
 
-Hardware setup:
-- I2S DAC required: SCK=GP16, WS=GP17, SD=GP28
-- Change SD pin: `mp.set_pin(26)`
-- On the PicoCalc GP16/GP17 are the SD card pins and the built-in
-  speakers are PWM-only, so this player produces no sound there and
-  breaks `/sd` until reset.
+- the list shows every `.wav`; Enter plays from there to the end of the list
+- Space pauses, `+`/`-` (or ↑/↓) set the volume (0-16), ←/→ previous/next
+  track, `q` stops
+- formats: PCM WAV, 8 or 16-bit, mono or stereo, 4000-48000 Hz.
+  **16-bit stereo at 22,050 Hz** is the sweet spot (88 KB/s from the card)
 
-Quick start:
-1. Copy `.wav` files to Pico flash (or SD card if available)
-2. `import mp3_player as mp`
-3. `mp.scan()` → find audio files
-4. `mp.load()` → load files into playlist
-5. `mp.play()` → play current track
+**MP3**: MicroPython on the PicoCalc has no MP3 decoder (PicoMite and
+ClockworkPi's MP3Player firmware decode in C, as separate firmwares), so
+convert on the computer first:
+
+```
+tools/to_wav.sh song.mp3 other.m4a     # -> song.wav, other.wav
+```
+
+It uses macOS `afconvert` (or `ffmpeg` elsewhere) and writes 16-bit stereo
+22,050 Hz files; copy them to `music/` on the card with a card reader (USB
+serial manages only ~8 KB/s, minutes per song).
+
+How it plays: PWM slice 5 drives GP26 (left) and GP27 (right) with a
+146 kHz carrier and 10-bit levels; a PWM slice with no pins ticks at the
+sample rate and paces two chained DMA channels that write each sample into
+the PWM, while Python refills the idle buffer from the SD card (read at
+8 MHz during playback, then the driver's 1.3 MHz again). The screen shows
+"gaps" if the card ever falls behind.
 
 Commands:
-- `import mp3_player as mp`
-- `mp.scan()` / `mp.ls()` → find audio files on device
-- `mp.scan('/music')` → scan specific directory
-- `mp.load()` / `mp.load('/music')` → load files into playlist
-- `mp.add('/path/to/file.wav')` → add single file to playlist
-- `mp.playlist()` / `mp.pl()` → show playlist
-- `mp.play()` / `mp.p()` → play current track
-- `mp.play(3)` / `mp.p(3)` → play track #3
-- `mp.stop()` / `mp.s()` → stop playback
-- `mp.next_track()` / `mp.n()` → next track
-- `mp.prev_track()` / `mp.pr()` → previous track
-- `mp.now_playing()` / `mp.np()` → show current track + status
-- `mp.browse()` / `mp.b()` → browse playlist (n/p/d/q/arrows)
-- `mp.info()` / `mp.info(2)` → file details
-- `mp.volume(80)` / `mp.v(80)` → set volume (0..100)
-- `mp.volume()` / `mp.v()` → show current volume
-- `mp.clear()` → clear playlist
-- `mp.set_pin(26)` → change audio output pin
-- `mp.ver()` / `mp.help()` / `mp.h()`
-
-Notes:
-- WAV playback supported via I2S only (I2S DAC required)
-- Only standard PCM WAV files supported (exotic formats with extra chunks may need conversion)
-- MP3 files require external decoder hardware
-- Volume control: software scaling on 16-bit WAV output
-- `q`/Esc (or Ctrl+C over USB) stops playback
-- Recommended format: 16-bit mono WAV at 44100Hz
+- `music.player()` / `music.m()` → the track list
+- `music.play('/sd/music/song.wav')` / `music.p()` → one file
+- `music.volume(12)` → 0-16
+- `music.ls()` → list the tracks found
 
 ## First-time setup
 1. Upload the `.py` files of the repo root to the Pico root (not `tests/`),
@@ -608,7 +597,7 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - **Uptime**: `s.uptime()` resets after ~12-25 days (MicroPython `ticks_ms` overflow). Mitigated with `ticks_diff` but still wraps on very long runs.
 - **WAV format**: Only standard PCM WAV files are fully supported. Files with extra metadata chunks (LIST, INFO) are now handled, but exotic formats may still fail.
 - **Cancelling**: Ctrl+C from the PicoCalc keyboard only acts while the program reads input; long loops poll for `q`/Esc instead, and a request already sent (AI, news, weather) runs until it answers or times out.
-- **MP3 playback**: Requires external decoder hardware. Software MP3 decoding is not supported.
+- **MP3 playback**: no MP3 decoder in MicroPython here; `tools/to_wav.sh` converts on the computer.
 - **Volume**: Software-scaled on 16-bit WAV. Very low volumes may reduce audio quality.
 - **RAM**: Large RSS feeds or long AI responses may cause memory pressure. Use `s.gc_run()` to free RAM.
 
@@ -626,10 +615,10 @@ import clock_ntp as c      # c.n() c.d() c.ts() c.tp() c.live()
 import notes as t          # t.l() t.s(1) t.v(1)
 import weather as m        # m.w() m.fc() m.sc('Rome')
 import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
-import mp3_player as mp    # mp.p() mp.s() mp.n() mp.b()
+import music               # music.m() music.p(path) music.volume(n)
 import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-04.1` for `files`, `apps`
-and `snake`, `2026-10-04.5` for `menu`, `2026-10-04.9` for `pico_utils`.
+Check on device with `<module>.ver()`: `2026-10-04.1` for `files`, `apps`,
+`snake` and `music`, `2026-10-04.6` for `menu`, `2026-10-04.9` for `pico_utils`.

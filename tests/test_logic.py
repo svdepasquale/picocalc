@@ -900,12 +900,121 @@ def test_snake_food_placement():
     check("no food left", s["food"], None)
 
 
+# music
+
+
+def _wav_bytes(channels, rate, bits, data, extra=b"", kind=1, ext=False):
+    fmt = (
+        (0xFFFE if ext else kind).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + rate.to_bytes(4, "little")
+        + (rate * channels * bits // 8).to_bytes(4, "little")
+        + (channels * bits // 8).to_bytes(2, "little")
+        + bits.to_bytes(2, "little")
+    )
+    if ext:
+        fmt += (22).to_bytes(2, "little") + bytes(6) + kind.to_bytes(2, "little") + bytes(14)
+    body = b"WAVE" + b"fmt " + len(fmt).to_bytes(4, "little") + fmt + extra
+    body += b"data" + len(data).to_bytes(4, "little") + data
+    return b"RIFF" + len(body).to_bytes(4, "little") + body
+
+
+def test_wav_info():
+    import music
+
+    data = bytes(range(16))
+    listc = b"LIST" + (5).to_bytes(4, "little") + b"abcde" + b"\x00"  # odd size, padded
+    fllr = b"FLLR" + (8).to_bytes(4, "little") + bytes(8)  # afconvert's filler
+    wav = _wav_bytes(2, 22050, 16, data, extra=listc + fllr)
+    info = music.wav_info(io.BytesIO(wav))
+    check("stereo 16-bit", info[:3], (2, 22050, 16))
+    check("data offset", wav[info[3] : info[3] + info[4]], data)
+    check("extensible PCM", music.wav_info(io.BytesIO(_wav_bytes(1, 8000, 8, data, ext=True)))[:3], (1, 8000, 8))
+    cut = _wav_bytes(1, 22050, 16, data)[:-6]
+    check("cut file clamps the size", music.wav_info(io.BytesIO(cut))[4], 10)
+    for name, blob in (
+        ("float rejected", _wav_bytes(1, 22050, 32, data, kind=3)),
+        ("24-bit rejected", _wav_bytes(1, 22050, 24, data)),
+        ("not a WAV", b"ID3" + bytes(40)),
+    ):
+        try:
+            music.wav_info(io.BytesIO(blob))
+            check(name, "accepted", "ValueError")
+        except ValueError:
+            pass
+
+
+def test_music_convert():
+    import music
+    from array import array
+
+    def word(d):
+        return (d << 16) | d
+
+    pcm = b"".join(v.to_bytes(2, "little") for v in (0, 32767, 32768, 65472))  # 0, max, min, -64
+    check("16-bit mono full", music.convert_reference(pcm, 4, 1, 16, 16), [word(512), word(1023), word(0), word(511)])
+    check("16-bit mono half", music.convert_reference(pcm, 3, 1, 16, 8), [word(512), word(767), word(256)])
+    check("8-bit stereo", music.convert_reference(bytes([255, 0]), 1, 2, 8, 16), [1020])
+    check("silence at 0", music.convert_reference(pcm, 2, 1, 16, 0), [word(512), word(512)])
+    data = bytes((i * 37 + 11) % 256 for i in range(4 * 64))
+    for channels, bits in ((2, 16), (1, 16), (2, 8), (1, 8)):
+        frames = len(data) // (channels * bits // 8)
+        frames = min(frames, 64)
+        out = array("I", [0] * frames)
+        music.convert(data, out, frames, channels, bits, 11)
+        check(
+            "convert {}ch {}-bit matches reference".format(channels, bits),
+            list(out),
+            music.convert_reference(data, frames, channels, bits, 11),
+        )
+    if sys.platform == "rp2":  # no native emitter on the unix port for arm64
+        check("viper compiled", music._VIPER is not None, True)
+
+
+def test_music_songs():
+    import music
+
+    folder = _HERE + "/_tmp_music"
+    _rmtree(folder)
+    os.mkdir(folder)
+    try:
+        _write(folder + "/b.wav", "x" * 10)
+        _write(folder + "/A.WAV", "")
+        _write(folder + "/._b.wav", "junk")
+        _write(folder + "/note.txt", "x")
+        os.mkdir(folder + "/x.wav")
+        found = music.songs((folder,))
+        check("wav only, by name", [song[0] for song in found], ["A", "b"])
+        check("size", found[1][2], 10)
+        check("missing folder", music.songs((folder + "/nope",)), [])
+    finally:
+        _rmtree(folder)
+
+
+def test_status_text_battery():
+    saved = (pu.battery, pu.wifi_connected, pu.clock_synced, pu.utc_offset_hours)
+    try:
+        pu.battery = lambda: (87, True)
+        pu.wifi_connected = lambda: True
+        pu.clock_synced = lambda: False
+        pu.utc_offset_hours = lambda: 0
+        pu.refresh_status()
+        check("battery labelled", pu.status_text(), "WiFi  Bat 87%+")
+        pu.battery = lambda: None
+        pu.refresh_status()
+        check("no reading, no battery", pu.status_text(), "WiFi")
+    finally:
+        pu.battery, pu.wifi_connected, pu.clock_synced, pu.utc_offset_hours = saved
+        pu.refresh_status()
+
+
 def test_menu_imports():
     import menu
 
-    check("menu apps", len(menu._APPS), 12)
+    check("menu apps", len(menu._APPS), 13)
     check("one key each", len(menu._KEY_INDEX), len(menu._APPS))
-    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "a", "s")], [9, 10, 11])
+    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "m", "a", "s")], [9, 10, 11, 12])
+    check("every app described", sorted(menu._ABOUT), sorted(app[0] for app in menu._APPS))
 
 
 def main():

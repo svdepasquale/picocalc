@@ -14,7 +14,7 @@ from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-04.5"
+MODULE_VERSION = "2026-10-04.6"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 _FIRST_ROW = 3  # screen row of the first app (title bar, blank line)
@@ -30,6 +30,7 @@ _APP_MODULES = (
     "clock_ntp",
     "sys_status",
     "files",
+    "music",
     "apps",
     "snake",
 )
@@ -241,6 +242,10 @@ def _files():
     _load("files").browse()
 
 
+def _music():
+    _load("music").player()
+
+
 def _apps():
     _load("apps").launcher()
 
@@ -279,6 +284,18 @@ def _hint_apps():
     return "{} found".format(count) if count else ""
 
 
+def _hint_music():
+    import os
+
+    count = 0
+    for folder in ("/sd/music", "/sd"):
+        try:
+            count += len([n for n in os.listdir(folder) if n.lower().endswith(".wav") and n[0] != "."])
+        except OSError:
+            pass
+    return "{} tracks".format(count) if count else ""
+
+
 def _hint_snake():
     best = (_load_json("snake.json") or {}).get("best")
     return "best {}".format(best) if best else ""
@@ -303,6 +320,7 @@ _APPS = (
     ("8", "Θ", "Clock", _clock, None),
     ("9", "■", "System", _system, None),
     ("0", "▬", "Files", _files, None),
+    ("m", "ƒ", "Music", _music, _hint_music),
     ("a", "►", "Apps", _apps, _hint_apps),
     ("s", "§", "Snake", _snake, _hint_snake),
 )
@@ -347,6 +365,10 @@ _ABOUT = {
     "0": (
         "Browse the flash and the SD card: read text files, edit them, run .py files, delete.",
         (("e", "edit"), ("r", "run"), ("d", "delete"), ("n", "new file")),
+    ),
+    "m": (
+        "WAV files from the SD card on the speakers or the headphones. Convert MP3s on the computer with tools/to_wav.sh.",
+        (("Enter", "play"), ("Space", "pause"), ("+/-", "volume"), ("\u2190\u2192", "track")),
     ),
     "a": (
         "Your own programs: every .py file in /sd/apps shows up here and runs with one key.",
