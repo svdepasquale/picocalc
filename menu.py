@@ -3,21 +3,21 @@
 import gc
 import sys
 
-from pico_utils import DISPLAY_WIDTH, PAGE_LINES
-from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
+import gfx
+from pico_utils import DISPLAY_WIDTH
+from pico_utils import ensure_screen as _ensure_screen
 from pico_utils import key_bar as _key_bar, load_json as _load_json, paint as _paint
 from pico_utils import read_key as _read_key, read_line as _read_line
-from pico_utils import screen_header as _screen_header, title_bar as _title_bar
+from pico_utils import screen_header as _screen_header
 from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
 from pico_utils import refresh_status as _refresh_status
 from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
-from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY
+from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-04.6"
+MODULE_VERSION = "2026-10-06.1"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
-_FIRST_ROW = 3  # screen row of the first app (title bar, blank line)
 _BACK = ("q", "Q", "esc", "eof")
 _APP_MODULES = (
     "wifi_manager",
@@ -382,16 +382,27 @@ _ABOUT = {
 
 
 # ── drawing ─────────────────────────────────────
-# The firmware draws ~4000 characters a second (escape bytes included), so
-# the screen is built once and a move repaints two rows and the panel.
+# Straight into the framebuffer (gfx), never print(): a full draw takes
+# ~40 ms and a move ~10 ms, against ~550 and ~100 ms through the terminal
+# (measured 2026-10-06). A move still repaints only two rows and the panel.
 
-_ROWS = PAGE_LINES + 6  # 40 on the PicoCalc
-_PANEL_ROW = _FIRST_ROW + len(_APPS) + 1  # separator above the panel
+_X = gfx.CHAR_W  # left margin
+_ROW_H = 10  # 8-pixel font, 2 pixels of air
+_LIST_Y = gfx.TITLE_H + 4  # first app row
+_PANEL_Y = _LIST_Y + len(_APPS) * _ROW_H + 6  # separator above the panel
 _PANEL_TEXT = 3  # description lines
-_FOOTER_ROW = _ROWS - 2  # separator, then the key bar
-_SHOW_PANEL = _PANEL_ROW + _PANEL_TEXT + 2 < _FOOTER_ROW
-_PARK = "\x1b[{};{}H".format(_ROWS - 1, DISPLAY_WIDTH)  # never the last row (pico_utils._set_margins)
-_HIDE, _SHOW = "\x1b[?25l", "\x1b[?25h"  # cursor off while the menu shows
+_PANEL_H = (_PANEL_TEXT + 2) * _ROW_H + 6
+_TEXT_COLS = gfx.COLUMNS - 3
+_FOOTER_Y = gfx.HEIGHT - 16  # separator, then the key bar
+_BLOCK = 6  # logo pixel pitch
+# Text in font codes and logo blocks, made once: each conversion costs more
+# than drawing the text (gfx timings).
+_FOOTER_KEYS = tuple(
+    (gfx.cp(k), gfx.cp(v)) for k, v in (("↑↓", "choose"), ("Enter/key", "open"), ("q", "REPL"))
+)
+_CELLS = []  # (key, icon, label) per app
+_PANELS = {}  # app key -> (title, description lines, key pairs)
+_LOGO = []  # (x, y, colour) per block
 _LOGO_FONT = {
     "P": ("████ ", "█   █", "████ ", "█    ", "█    "),
     "I": ("███", " █ ", " █ ", " █ ", "███"),
@@ -402,41 +413,46 @@ _LOGO_FONT = {
 }
 
 
-def _at(row, text):
-    return "\x1b[{};1H\x1b[K{}".format(row, text)
-
-
-def _keys(pairs):
-    return "  ".join(_paint(key, BYELLOW) + " " + label for key, label in pairs)
-
-
-def _row_text(index, hints, selected):
-    key, icon, label, _, _ = _APPS[index]
-    hint = hints[index]
-    if selected:
-        text = " {}  {}  {:<13}{}".format(key, icon, label, hint)
-        return _paint("{:<{}}".format(text, DISPLAY_WIDTH)[:DISPLAY_WIDTH], BLACK, BCYAN)
-    return " {}  {}  {:<13}{}".format(
-        _paint(key, BYELLOW), _paint(icon, BCYAN), label, _paint(hint, GREY)
-    )
+def _cells():
+    if not _CELLS:
+        _CELLS.extend(tuple(gfx.cp(part) for part in app[:3]) for app in _APPS)
+    return _CELLS
 
 
 def _row(index, hints, selected):
-    return _at(_FIRST_ROW + index, _row_text(index, hints, selected))
+    key, icon, label = _cells()[index]
+    y = _LIST_Y + index * _ROW_H
+    gfx.fill_rect(0, y, gfx.WIDTH, _ROW_H, BCYAN if selected else BLACK)
+    y += 1
+    gfx.text(key, _X, y, BLACK if selected else BYELLOW)
+    gfx.text(icon, _X * 4, y, BLACK if selected else BCYAN)
+    gfx.text(label, _X * 7, y, BLACK if selected else WHITE)
+    if hints[index]:
+        gfx.text(hints[index], _X * 20, y, BLACK if selected else GREY)
+
+
+def _panel_text(index):
+    key = _APPS[index][0]
+    if key not in _PANELS:
+        _, icon, label = _cells()[index]
+        about, keys = _ABOUT[key]
+        lines = [gfx.cp(line) for line in _wrap_text(about, _TEXT_COLS)[:_PANEL_TEXT]]
+        pairs = tuple((gfx.cp(k), gfx.cp(v)) for k, v in keys)
+        _PANELS[key] = (icon + b" " + label, lines, pairs)
+    return _PANELS[key]
 
 
 def _panel(index, hints):
     # What the highlighted app does, and its keys.
-    key, icon, label = _APPS[index][:3]
-    about, keys = _ABOUT[key]
-    lines = _wrap_text(about, DISPLAY_WIDTH - 2)[:_PANEL_TEXT]
-    lines += [""] * (_PANEL_TEXT - len(lines))
-    hint = "  " + _paint(hints[index], GREY) if hints[index] else ""
-    out = [_at(_PANEL_ROW + 1, " " + _paint(icon + " " + label, BCYAN) + hint)]
+    title, lines, keys = _panel_text(index)
+    gfx.fill_rect(0, _PANEL_Y + 1, gfx.WIDTH, _PANEL_H, BLACK)
+    y = _PANEL_Y + 5
+    x = gfx.text(title, _X, y, BCYAN)
+    if hints[index]:
+        gfx.text(hints[index], x + 2 * gfx.CHAR_W, y, GREY)
     for i, line in enumerate(lines):
-        out.append(_at(_PANEL_ROW + 2 + i, " " + line))
-    out.append(_at(_PANEL_ROW + 2 + _PANEL_TEXT, " " + _keys(keys)))
-    return "".join(out)
+        gfx.text(line, _X, y + (i + 1) * _ROW_H, WHITE)
+    gfx.key_bar(keys, _X, y + (_PANEL_TEXT + 1) * _ROW_H + 2)
 
 
 def _word(word, line):
@@ -444,47 +460,55 @@ def _word(word, line):
 
 
 def _machine_line():
+    # Bytes in font codes: 0xFA is the CP437 middle dot.
     impl = sys.implementation
     board = getattr(impl, "_machine", "").split(" with ")[0].replace("Raspberry Pi ", "")
     parts = (board, "MicroPython " + ".".join(str(n) for n in impl.version[:3]))
-    return "  ·  ".join([p for p in parts if p] + ["{} KB free".format(_mem_free() // 1024)])
+    parts = [p for p in parts if p] + ["{} KB free".format(_mem_free() // 1024)]
+    return b"  \xfa  ".join(p.encode() for p in parts)
+
+
+def _logo_top():
+    top = _PANEL_Y + _PANEL_H + 1
+    return top + (_FOOTER_Y - top - 5 * _BLOCK - 16) // 2
 
 
 def _logo():
     # PICOCALC in block letters and a status line, between panel and footer.
-    top = _PANEL_ROW + _PANEL_TEXT + 3
-    space = _FOOTER_ROW - top
-    if not _SHOW_PANEL or space < 7:
-        return ""
-    row = top + (space - 7) // 2
-    pad = " " * max(0, (DISPLAY_WIDTH - len(_word("PICO", 0)) - 2 - len(_word("CALC", 0))) // 2)
-    out = []
-    for i in range(5):
-        out.append(_at(row + i, pad + _paint(_word("PICO", i), BCYAN) + "  " + _paint(_word("CALC", i), BWHITE)))
-    info = _machine_line()
-    out.append(_at(row + 6, " " * max(0, (DISPLAY_WIDTH - len(info)) // 2) + _paint(info, GREY)))
-    return "".join(out)
+    top = _logo_top()
+    if not _LOGO:
+        cells = len(_word("PICO", 0)) + 2 + len(_word("CALC", 0))
+        x0 = (gfx.WIDTH - cells * _BLOCK) // 2
+        for line in range(5):
+            x = x0
+            for word, color in (("PICO", BCYAN), ("CALC", BWHITE)):
+                for ch in _word(word, line):
+                    if ch != " ":
+                        _LOGO.append((x, top + line * _BLOCK, color))
+                    x += _BLOCK
+                x += 2 * _BLOCK
+    for x, y, color in _LOGO:
+        gfx.fill_rect(x, y, _BLOCK - 1, _BLOCK - 1, color)
+    gfx.center(_machine_line(), top + 5 * _BLOCK + 8, GREY)
 
 
 def _draw(selected, hints):
-    _clear_screen()
-    out = [_HIDE, _at(1, _title_bar("PicoCalc"))]
+    gfx.begin()
+    gfx.clear()
+    gfx.title_bar("PicoCalc")
     for index in range(len(_APPS)):
-        out.append(_row(index, hints, index == selected))
-    if _SHOW_PANEL:
-        out.append(_at(_PANEL_ROW, _paint("─" * DISPLAY_WIDTH, GREY)))
-        out.append(_panel(selected, hints))
-        out.append(_logo())
-    out.append(_at(_FOOTER_ROW, _paint("─" * DISPLAY_WIDTH, GREY)))
-    out.append(_at(_FOOTER_ROW + 1, _keys((("↑↓", "choose"), ("Enter/key", "open"), ("q", "REPL")))))
-    print("".join(out) + _PARK, end="")
+        _row(index, hints, index == selected)
+    gfx.hline(0, _PANEL_Y, gfx.WIDTH, GREY)
+    _panel(selected, hints)
+    _logo()
+    gfx.hline(0, _FOOTER_Y, gfx.WIDTH, GREY)
+    gfx.key_bar(_FOOTER_KEYS, _X, _FOOTER_Y + 5)
 
 
 def _move(old, new, hints):
-    out = _row(old, hints, False) + _row(new, hints, True)
-    if _SHOW_PANEL:
-        out += _panel(new, hints)
-    print(out + _PARK, end="")
+    _row(old, hints, False)
+    _row(new, hints, True)
+    _panel(new, hints)
 
 
 def _hints():
@@ -498,7 +522,7 @@ def _hints():
 
 
 def _launch(index):
-    print(_SHOW, end="")
+    gfx.end()
     try:
         _APPS[index][3]()
     except KeyboardInterrupt:
@@ -540,8 +564,8 @@ def run(connect=True):
         _loop(connect)
     except _HostTakeover:
         note = " (USB host)"
-    _clear_screen()
-    print(_SHOW + "REPL{}. Menu: import go".format(note))
+    gfx.end()
+    print("REPL{}. Menu: import go".format(note))
 
 
 def _loop(connect):
@@ -559,7 +583,7 @@ def _loop(connect):
         except KeyboardInterrupt:
             break
         if key is None:
-            print("\x1b[1;1H" + _title_bar("PicoCalc") + _PARK, end="")
+            gfx.title_bar("PicoCalc")
             continue
         if key in _BACK:
             break

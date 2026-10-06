@@ -1017,6 +1017,98 @@ def test_menu_imports():
     check("every app described", sorted(menu._ABOUT), sorted(app[0] for app in menu._APPS))
 
 
+# ── gfx ─────────────────────────────────────────
+
+import gfx
+
+
+class FakeDisplay:
+    def __init__(self):
+        self.calls = []
+
+    def fill_rect(self, x, y, w, h, c):
+        self.calls.append(("fill_rect", x, y, w, h, c))
+
+    def hline(self, x, y, w, c):
+        self.calls.append(("hline", x, y, w, c))
+
+    def text(self, s, x, y, c):
+        self.calls.append(("text", s, x, y, c))
+
+
+def _with_display(body):
+    saved = (gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text)
+    fake = FakeDisplay()
+    vt = FakeVt()
+    try:
+        gfx.surface = lambda: fake
+        gfx._terminal = lambda: vt
+        gfx._clear_screen = lambda: vt.drawn.append("<clear>")
+        gfx._status_text = lambda: "12:34  WiFi"
+        body(fake, vt)
+    finally:
+        gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text = saved
+        gfx._FB[0] = None
+
+
+def test_gfx_font_codes():
+    check("ascii as bytes", gfx.cp("plain"), b"plain")
+    check("accents as cp437 bytes", gfx.cp("città"), b"citt\x85")
+    check("left arrow is a glyph here", gfx.cp("←→"), b"\x1b\x1a")
+    check("bytes pass", gfx.cp(b"\x10"), b"\x10")
+    check("numbers drawn", gfx.cp(42), b"42")
+
+
+def test_gfx_text_and_mode():
+    def body(fake, vt):
+        gfx.text("before", 0, 0)
+        check("no drawing before begin()", fake.calls, [])
+        gfx.begin()
+        check("cursor off and home", vt.drawn[-1], "\x1b[?25l\x1b[H")
+        check("x after the text", gfx.text("ab", 6, 8, 7, bg=4), 18)
+        check("background first", fake.calls[0], ("fill_rect", 6, 8, 12, 8, 4))
+        check("then the glyphs", fake.calls[1], ("text", b"ab", 6, 8, 7))
+        del fake.calls[:]
+        gfx.title_bar("T")
+        check("title bar", fake.calls[0], ("fill_rect", 0, 0, 320, gfx.TITLE_H, pu.BLUE))
+        check("status on the right", fake.calls[-1], ("text", b"12:34  WiFi", 320 - 12 * 6, 2, pu.BWHITE))
+        del fake.calls[:]
+        gfx.end()
+        check("all 320 columns blanked", fake.calls, [("fill_rect", 0, 0, 320, 320, pu.BLACK)])
+        check("cleared, cursor on", vt.drawn[-2:], ["<clear>", "\x1b[?25h"])
+        del fake.calls[:]
+        gfx.text("after", 0, 0)
+        check("no drawing after end()", fake.calls, [])
+
+    _with_display(body)
+
+
+def test_menu_draw_and_move():
+    import menu
+
+    def body(fake, vt):
+        hints = [""] * len(menu._APPS)
+        hints[1] = "città"
+        menu._draw(1, hints)
+        check("screen taken first", vt.drawn[0], "\x1b[?25l\x1b[H")
+        check("whole screen painted", fake.calls[0], ("fill_rect", 0, 0, 320, 320, pu.BLACK))
+        bands = [c[5] for c in fake.calls if c[0] == "fill_rect" and c[4] == menu._ROW_H]
+        check("one band per app", len(bands), len(menu._APPS))
+        check("selected band", bands[1], pu.BCYAN)
+        check("the others black", [b for i, b in enumerate(bands) if i != 1], [pu.BLACK] * (len(bands) - 1))
+        hint = ("text", b"citt\x85", 6 * 20, menu._LIST_Y + menu._ROW_H + 1, pu.BLACK)
+        check("hint in font codes", hint in fake.calls, True)
+        check("nothing past the screen", [c for c in fake.calls if c[0] == "text" and c[3] > 312], [])
+        del fake.calls[:]
+        menu._move(1, 2, hints)
+        bands = [c[5] for c in fake.calls if c[0] == "fill_rect" and c[4] == menu._ROW_H]
+        check("move repaints two rows", bands, [pu.BLACK, pu.BCYAN])
+        gfx.surface = lambda: None
+        menu._draw(0, hints)  # away from the PicoCalc: draws nothing, no error
+
+    _with_display(body)
+
+
 def main():
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     for name, fn in tests:
