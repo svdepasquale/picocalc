@@ -29,7 +29,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-04.4"
+MODULE_VERSION = "2026-10-06.1"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -497,11 +497,17 @@ def set_items_per_feed(count):
     return value
 
 
-def _read_capped(response, limit):
-    # At most `limit` bytes straight from the socket: response.text would
-    # buffer the whole body (130 KB for some feeds) before truncating.
+def _buffer(limit):
+    # Allocated before the request: on a fragmented heap the MemoryError then
+    # costs nothing, where after it the request (a TLS handshake) was wasted.
     gc.collect()  # one contiguous block: compact the heap first
-    buf = bytearray(limit)
+    return bytearray(limit)
+
+
+def _read_capped(response, buf):
+    # At most len(buf) bytes straight from the socket: response.text would
+    # buffer the whole body (130 KB for some feeds) before truncating.
+    limit = len(buf)
     view = memoryview(buf)
     got = 0
     while got < limit:
@@ -525,8 +531,8 @@ def _decode_text(buf, got):
     return str(view[:got], "utf-8")
 
 
-def _read_body(response, limit):
-    buf, got = _read_capped(response, limit)
+def _read_body(response, buf):
+    buf, got = _read_capped(response, buf)
     return _decode_text(buf, got)
 
 
@@ -536,12 +542,14 @@ def _fetch_feed(name, url, per_feed, requests):
     start = _ticks_ms()
 
     try:
+        buf = _buffer(MAX_XML_BYTES)
         response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
             print("HTTP:", status)
             return []
-        xml_text = _read_body(response, MAX_XML_BYTES)
+        xml_text = _read_body(response, buf)
+        del buf
     except Exception as error:
         print("Fetch err:", _clip(error, 24))
         return []
@@ -734,6 +742,7 @@ def _mf_fetch(config, requests, limit, cap=MF_MAX_BYTES):
         config["url"], limit
     )
     response = None
+    buf = _buffer(cap)  # a MemoryError here comes before any request
     try:
         response = _http_request(
             requests, "GET", url, headers={"X-Auth-Token": config["token"]}
@@ -741,7 +750,7 @@ def _mf_fetch(config, requests, limit, cap=MF_MAX_BYTES):
         status = response.status_code
         if status != 200:
             return status, None
-        buf, got = _read_capped(response, cap)
+        buf, got = _read_capped(response, buf)
     finally:
         if response is not None:
             try:
