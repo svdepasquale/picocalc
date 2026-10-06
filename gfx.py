@@ -18,7 +18,7 @@ try:
 except ImportError:  # CPython
     _framebuf = None
 
-MODULE_VERSION = "2026-10-06.6"
+MODULE_VERSION = "2026-10-06.7"
 
 WIDTH = 320
 HEIGHT = 320
@@ -569,19 +569,43 @@ class Console:
                 self.col = min(CON_COLS, (min(self.col, CON_COLS) - 1) // 8 * 8 + 9)
             i += 1
 
+    def blocks(self, rows, row, col, fg):
+        # Text rows whose █ cells join into solid shapes: each run of █ fills
+        # its rows' full height (the clock's digits); the rest is cleared.
+        fb = _FB[0]
+        if fb is None:
+            return
+        if self.beam is not None:
+            self._beam_off(fb)
+        x0 = _X0 + (col - 1) * CHAR_W
+        for line in rows:
+            self._goto(min(row, CON_ROWS))
+            fb.fill_rect(0, self.y, WIDTH, self.h, BLACK)
+            i = line.find("\u2588")
+            while i >= 0:
+                j = i
+                while j < len(line) and line[j] == "\u2588":
+                    j += 1
+                fb.fill_rect(x0 + i * CHAR_W, self.y, (j - i) * CHAR_W, self.h, fg)
+                i = line.find("\u2588", j)
+            row += 1
+        self.col = 1
+
     def waiting(self):
-        # Someone waits for typed text (input(), read_line): show the cursor.
+        # Someone waits for typed text (input(), read_line): show the cursor,
+        # a line under the cell in the gap between rows, where no glyph is.
         fb = _FB[0]
         if fb is None or not self.cursor or self.beam is not None:
             return
-        x = (min(self.col, CON_COLS) - 1) * CHAR_W  # the free column left of the cell
-        under = fb.pixel(x, self.ty + 4)
-        fb.fill_rect(x, self.ty, 1, CHAR_H, BWHITE)
-        self.beam = (x, self.ty, under)
+        x = _X0 + (min(self.col, CON_COLS) - 1) * CHAR_W
+        y = self.ty + CHAR_H
+        under = fb.pixel(x, y)
+        fb.fill_rect(x, y, CHAR_W - 1, 2, BWHITE)
+        self.beam = (x, y, under)
 
     def _beam_off(self, fb):
         x, y, under = self.beam
-        fb.fill_rect(x, y, 1, CHAR_H, under)
+        fb.fill_rect(x, y, CHAR_W - 1, 2, under)
         self.beam = None
 
     # ── text ──

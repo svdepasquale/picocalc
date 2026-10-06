@@ -1184,6 +1184,11 @@ def test_console_split_writes():
         write("è".encode()[1:] + b"!")
         texts = [c for c in fake.calls if c[0] in ("text", "blit")]
         check("utf-8 split across writes", texts[-1], ("text", b"\x8a!", 7, 2, 2))
+        write(b"\x1b[38;5;1")  # the inline colour path, split
+        write(b"4mY")
+        check("colour code split across writes", fake.calls[-1], ("text", b"Y", 19, 2, 14))
+        write(b"\x1b[mZ")
+        check("ESC [ m resets", fake.calls[-1], ("text", b"Z", 25, 2, pu.WHITE))
 
     _console(body)
 
@@ -1219,9 +1224,9 @@ def test_console_scroll_and_cursor():
         check("last row cleared", fake.calls[-1], ("fill_rect", 0, 304, 320, 16, pu.BLACK))
         del fake.calls[:]
         con.waiting()
-        check("cursor drawn left of the cell", fake.calls[-1], ("fill_rect", 0, 305, 1, 8, pu.BWHITE))
+        check("cursor under the cell", fake.calls[-1], ("fill_rect", 1, 313, 5, 2, pu.BWHITE))
         write(b"x")
-        check("cursor erased first", fake.calls[1], ("fill_rect", 0, 305, 1, 8, 0))
+        check("cursor erased first", fake.calls[1], ("fill_rect", 1, 313, 5, 2, 0))
 
     _console(body)
 
@@ -1247,6 +1252,32 @@ def test_gfx_native_matches_python():
     buf = bytearray(range(64))
     gfx._move_up(buf, 8, 24, 32)
     check("move up", bytes(buf[8:40]), bytes(range(24, 56)))
+
+
+def test_block_rows():
+    def body(fake, write):
+        pu.block_rows(["\u2588\u2588  \u2588\u2588", "  \u2588\u2588  "], 5, 3, pu.BCYAN)
+        rects = [c[1:] for c in fake.calls if c[0] == "fill_rect" and c[5] == pu.BCYAN]
+        check("solid blocks, full row height", rects, [(13, 44, 12, 10, 14), (37, 44, 12, 10, 14), (25, 54, 12, 10, 14)])
+
+    _console(body)
+    if sys.implementation.name != "micropython":  # sys.stdout is fixed there
+        printed = io.StringIO()
+        real = sys.stdout
+        sys.stdout = printed
+        try:
+            pu.block_rows(["\u2588 \u2588"], 5, 3, pu.BCYAN)
+        finally:
+            sys.stdout = real
+        check("printed on the terminal", "\x1b[5;1H\x1b[K  " in printed.getvalue(), True)
+
+
+def test_console_fits_pick_and_pager():
+    # pick() repaints rows at fixed positions: its list, separator and two
+    # footer rows must fit the console without scrolling; pagers likewise.
+    rows = pu.CON_ROWS - 6 - 4  # PAGE_LINES on the PicoCalc, minus pick's margin
+    check("pick fits", pu._PICK_TOP + rows + 1 + 2 <= pu.CON_ROWS, True)
+    check("a page plus header and prompt fits", 2 + (pu.CON_ROWS - 6) + 1 <= pu.CON_ROWS, True)
 
 
 def test_console_failure_falls_back():

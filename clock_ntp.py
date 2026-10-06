@@ -6,11 +6,11 @@ from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _loc
 from pico_utils import clock_synced as _clock_synced
 from pico_utils import poll_key as _poll_key, read_key as _read_key, sleep_ms as _sleep_ms
 from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
-from pico_utils import paint as _paint, bar as _bar, DISPLAY_WIDTH
+from pico_utils import paint as _paint, bar as _bar, block_rows as _block_rows, DISPLAY_WIDTH
 from pico_utils import BCYAN, BYELLOW, GREY, GREEN
 
 
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-06.1"
 NTP_HOST = "pool.ntp.org"
 NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
@@ -279,9 +279,7 @@ def live():
                 print("\x1b[3;1H\x1b[K {} {:04d}-{:02d}-{:02d}  {}".format(
                     days[lt[6] % 7], lt[0], lt[1], lt[2], _paint(label, GREY)), end="")
                 rows = big_lines("{:02d}:{:02d}:{:02d}".format(lt[3], lt[4], lt[5]))
-                margin = " " * max(0, (DISPLAY_WIDTH - len(rows[0])) // 2)
-                for i, row in enumerate(rows):
-                    print("\x1b[{};1H\x1b[K{}{}".format(5 + i, margin, _paint(row, BCYAN)), end="")
+                _block_rows(rows, 5, 1 + max(0, (DISPLAY_WIDTH - len(rows[0])) // 2), BCYAN)
                 print("\x1b[11;1H\x1b[K " + _paint("any key", BYELLOW) + " back", end="")
             if _read_key(200) is not None:
                 break

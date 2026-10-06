@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-06.2"
+MODULE_VERSION = "2026-10-06.3"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -229,6 +229,21 @@ def _show_cursor():
             con.waiting()
         except Exception:
             pass
+
+
+def block_rows(rows, row, col, fg):
+    """Rows of text with █ blocks at screen row `row`, column `col`: the clock's
+    big digits. gfx's console draws the blocks solid (its rows have gaps
+    between glyphs); the terminal prints them."""
+    con = _CONSOLE[0]
+    if con is not None:
+        try:
+            con.blocks(rows, row, col, fg)
+            return
+        except Exception:
+            pass
+    for i, line in enumerate(rows):
+        print("\x1b[{};1H\x1b[K{}{}".format(row + i, " " * (col - 1), paint(line, fg)), end="")
 
 
 def console_suspend():
