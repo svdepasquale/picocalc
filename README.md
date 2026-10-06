@@ -15,6 +15,7 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Sy
 - `go.py` → `import go` opens the launcher
 - `main.py` → opens the launcher at boot where the firmware has no frozen `main.py`
 - `menu.py` → launcher: one key per app
+- `gfx.py` → draws straight on the screen (the launcher), over 10x faster than printing
 - `files.py` → file manager for flash and the SD card
 - `apps.py` → runs the `.py` files in `/sd/apps` (or `/apps` on flash)
 - `snake.py` → Snake, best score kept on flash
@@ -61,6 +62,9 @@ It opens by itself when the PicoCalc is switched on; from the REPL,
 - `q` leaves to the REPL; `import go` reopens it
 - `mpremote` or Thonny connecting over USB also leaves to the REPL, so
   they get it at once (the screen says `REPL (USB host)`)
+- it draws straight into the screen's memory (`gfx.py`) instead of printing
+  through the terminal: the whole screen in ~40 ms instead of ~550, a move
+  in ~10 ms instead of ~100
 
 ### How it opens at power-on
 The official ClockworkPi firmware freezes its own `boot.py` and `main.py`
@@ -104,14 +108,18 @@ at power-on):
   (at the REPL it detached the screen). It now saves the screen to
   `/sd/screen_<number>.bmp`.
 
-The terminal draws about 4000 characters a second, so screens are drawn
-once and moves repaint only what changes.
+The terminal draws about 9,500 characters a second (its driver hands them
+to C one at a time from a Python loop), so printed screens are drawn once
+and moves repaint only what changes. The launcher skips the terminal and
+draws into the screen's memory with C calls (`gfx.py`): a full screen of
+text takes ~18 ms that way against ~220 ms printed.
 
 ## Look
 Colours (the terminal's 16-colour palette), a title bar with time, Wi-Fi
 and battery, bars for RAM/flash/battery, a big block-digit clock and a
 progress bar for the countdown. `s.colors()` (System → `c`) shows the
-palette.
+palette. The launcher is drawn rather than printed: a highlight bar, thin
+separator lines and the PICOCALC logo in square blocks.
 
 ## Keys
 Menus, viewers and pagers react to single keys, no Enter:
@@ -621,4 +629,5 @@ import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 
 ## Current version
 Check on device with `<module>.ver()`: `2026-10-04.1` for `files`, `apps`,
-`snake` and `music`, `2026-10-04.6` for `menu`, `2026-10-04.9` for `pico_utils`.
+`snake` and `music`, `2026-10-06.1` for `menu` and `pico_utils`,
+`2026-10-06.3` for `gfx`.

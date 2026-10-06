@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-04.10"
+MODULE_VERSION = "2026-10-06.1"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -105,7 +105,8 @@ _FOLDS = {
 def to_cp437(text):
     # Map text to the codes the PicoCalc font draws (CP437); the rest -> ASCII.
     # One replace() per distinct character: a loop over every character cost
-    # ~75 us each on the device, a quarter of what drawing it costs.
+    # ~75 us each on the device, nearly what the terminal takes to draw it
+    # (~0.1 ms, measured 2026-10-06).
     if len(text) == len(text.encode()):
         return text
     table = {}
