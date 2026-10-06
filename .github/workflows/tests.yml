@@ -1,0 +1,50 @@
+name: Tests
+
+# The host checks in tests/test_logic.py, on CPython and on MicroPython's unix
+# port. There is nothing to build: the toolkit is plain .py files copied to the
+# Pico, which compiles them itself. The display, keyboard and audio are tested
+# on the device only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpython:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Host tests on CPython
+        run: python3 tests/test_logic.py
+
+  micropython:
+    runs-on: ubuntu-latest
+    env:
+      MICROPYTHON_VERSION: v1.29.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache the unix port
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/micropython-bin
+          key: micropython-unix-${{ env.MICROPYTHON_VERSION }}-${{ runner.os }}
+      - name: Build the unix port
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev pkg-config
+          src="$RUNNER_TEMP/micropython"
+          git clone --depth 1 --branch "$MICROPYTHON_VERSION" https://github.com/micropython/micropython.git "$src"
+          make -C "$src/mpy-cross" -j"$(nproc)"
+          make -C "$src/ports/unix" submodules
+          make -C "$src/ports/unix" -j"$(nproc)"
+          mkdir -p ~/micropython-bin
+          cp "$src/ports/unix/build-standard/micropython" ~/micropython-bin/
+      - name: Host tests on MicroPython
+        run: ~/micropython-bin/micropython tests/test_logic.py
