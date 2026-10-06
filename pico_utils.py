@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-06.1"
+MODULE_VERSION = "2026-10-06.2"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -31,18 +31,32 @@ def _terminal():
     return getattr(mod, "terminal", None)
 
 
+# gfx's screen console, which draws what apps print while the launcher runs:
+# a 12-pixel title row, then rows of 10 pixels, 53 columns.
+CON_COLS = 53
+CON_TITLE_H = 12
+CON_ROW_H = 10
+CON_ROW_TOP = CON_TITLE_H + 2  # y of row 2
+CON_ROWS = 1 + (320 - CON_ROW_TOP) // CON_ROW_H  # 31
+
 DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 SCREEN_ROWS = 14
+_TERM_ROWS = 14
 try:
     _rows, _cols = _terminal().get_screen_size()
-    SCREEN_ROWS = _rows
+    _TERM_ROWS = _rows  # the firmware terminal's 40, for its scroll margins
+    # Apps lay out for the console's rows, the fewer: the same screens fit the
+    # terminal when they run from the REPL.
+    SCREEN_ROWS = min(_rows, CON_ROWS)
     # one column short of the edge: the terminal wraps on the last column
     DISPLAY_WIDTH = _cols - 1
     # room for a header and the pager prompt
-    PAGE_LINES = _rows - 6
+    PAGE_LINES = SCREEN_ROWS - 6
 except Exception:
     pass
+
+_CONSOLE = [None]  # gfx's console while gfx owns the screen (gfx.begin/end)
 
 # Unicode characters the CP437 font has, and the codes of their glyphs
 # (0x10-0x1F glyphs too: the terminal draws them, except 0x1B = ESC).
@@ -141,6 +155,13 @@ class _ScreenTerm(_IOBase):
         self._term = term
 
     def write(self, buf):
+        con = _CONSOLE[0]
+        if con is not None:
+            try:
+                con.write(buf)
+                return len(buf)
+            except Exception:
+                pass  # drawn by the terminal instead: raising would detach the screen
         if isinstance(buf, str):
             text = buf
         else:
@@ -155,6 +176,12 @@ class _ScreenTerm(_IOBase):
         # The keyboard MCU answers EIO while the PicoCalc is off (Pico on USB
         # power only), and a firmware bug can raise on Ctrl+U: raising here
         # would make dupterm detach the screen.
+        con = _CONSOLE[0]
+        if con is not None:
+            try:
+                con.waiting()  # input() reads: show the console's cursor
+            except Exception:
+                pass
         try:
             return self._term.readinto(buf)
         except Exception:
@@ -168,7 +195,7 @@ def _set_margins(term, keep_cursor=False):
     # driver's buffer (the next heap block) and SD reads failed. A scroll
     # region one row short keeps that row on screen. Never move the cursor
     # to the last row: a line feed from there is the same overflow.
-    seq = "\x1b[1;{}r".format(SCREEN_ROWS - 1)  # DECSTBM homes the cursor
+    seq = "\x1b[1;{}r".format(_TERM_ROWS - 1)  # DECSTBM homes the cursor
     try:
         term.wr("\x1b7" + seq + "\x1b8" if keep_cursor else seq)
     except Exception:
@@ -192,6 +219,34 @@ def _install_screen():
         return True  # else: the old wrapper held a terminal boot.py replaced
     os.dupterm(prev)  # not the PicoCalc terminal: leave it alone
     return False
+
+
+def _show_cursor():
+    # gfx's console draws a cursor only while something waits for text.
+    con = _CONSOLE[0]
+    if con is not None:
+        try:
+            con.waiting()
+        except Exception:
+            pass
+
+
+def console_suspend():
+    """Lend the screen to the firmware terminal, for a program that writes to
+    it directly (the pye editor). Returns what console_resume() takes."""
+    con = _CONSOLE[0]
+    if con is None:
+        return None
+    import gfx
+
+    return gfx.suspend()
+
+
+def console_resume(token):
+    if token:
+        import gfx
+
+        gfx.resume()
 
 
 def ensure_screen():
@@ -589,6 +644,7 @@ def read_line(prompt="", mask=None, max_len=120):
     print(prompt, end="")
     chars = []
     while True:
+        _show_cursor()
         key = read_key()
         if key == "enter":
             print()

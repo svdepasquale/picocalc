@@ -344,11 +344,11 @@ import rss_news
 
 
 def test_read_body_cap_and_decode():
-    body = rss_news._read_body(FakeResponse(b"x" * 100), 40)
+    body = rss_news._read_body(FakeResponse(b"x" * 100), bytearray(40))
     check("cap", len(body), 40)
-    check("utf8 cut at cap", rss_news._read_body(FakeResponse("abcà".encode()), 4), "abc")
-    check("latin-1 falls back", rss_news._read_body(FakeResponse(b"caf\xe9 ok"), 50), "caf? ok")
-    check("short body", rss_news._read_body(FakeResponse(b"<rss/>"), 50), "<rss/>")
+    check("utf8 cut at cap", rss_news._read_body(FakeResponse("abcà".encode()), bytearray(4)), "abc")
+    check("latin-1 falls back", rss_news._read_body(FakeResponse(b"caf\xe9 ok"), bytearray(50)), "caf? ok")
+    check("short body", rss_news._read_body(FakeResponse(b"<rss/>"), bytearray(50)), "<rss/>")
 
 
 def test_clean_text():
@@ -601,22 +601,23 @@ def test_miniflux_large_and_401():
         rss_news._http_module = lambda: req
         check("falls back to 1", rss_news.mf(), 1)
         check("retry used limit=1", "limit=1" in req.calls[1][1], True)
-        # no 48 KB block free: retry with one entry in the smaller buffer
-        real_read = rss_news._read_capped
+        # no 48 KB block free: one entry in the smaller buffer, and the
+        # failed allocation comes before any request
+        real_buffer = rss_news._buffer
 
-        def tight_read(response, limit):
+        def tight_buffer(limit):
             if limit > rss_news.MF_MIN_BYTES:
                 raise MemoryError("memory allocation failed")
-            return real_read(response, limit)
+            return real_buffer(limit)
 
-        rss_news._read_capped = tight_read
-        req = ScriptedRequests([HttpResponse(200, _MF_BODY), HttpResponse(200, _MF_BODY)])
+        rss_news._buffer = tight_buffer
+        req = ScriptedRequests([HttpResponse(200, _MF_BODY)])
         rss_news._http_module = lambda: req
         try:
             check("low memory falls back", rss_news.mf(), 1)
-            check("fallback asks for 1", "limit=1" in req.calls[1][1], True)
+            check("one request, for 1", [("limit=1" in c[1]) for c in req.calls], [True])
         finally:
-            rss_news._read_capped = real_read
+            rss_news._buffer = real_buffer
         req = ScriptedRequests([HttpResponse(401, b"{}")])
         rss_news._http_module = lambda: req
         check("401 stops", rss_news.mf(), 0)
@@ -1032,12 +1033,21 @@ class FakeDisplay:
     def hline(self, x, y, w, c):
         self.calls.append(("hline", x, y, w, c))
 
+    def vline(self, x, y, h, c):
+        self.calls.append(("vline", x, y, h, c))
+
     def text(self, s, x, y, c):
         self.calls.append(("text", s, x, y, c))
 
+    def blit(self, src, x, y, key=-1, palette=None):
+        self.calls.append(("blit", x, y))
+
+    def pixel(self, x, y, c=None):
+        return 0
+
 
 def _with_display(body):
-    saved = (gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text)
+    saved = (gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text, gfx._move_up)
     fake = FakeDisplay()
     vt = FakeVt()
     try:
@@ -1045,10 +1055,12 @@ def _with_display(body):
         gfx._terminal = lambda: vt
         gfx._clear_screen = lambda: vt.drawn.append("<clear>")
         gfx._status_text = lambda: "12:34  WiFi"
+        gfx._move_up = lambda fb, dst, src, n: fake.calls.append(("move_up", dst, src, n))
         body(fake, vt)
     finally:
-        gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text = saved
+        gfx.surface, gfx._terminal, gfx._clear_screen, gfx._status_text, gfx._move_up = saved
         gfx._FB[0] = None
+        pu._CONSOLE[0] = None
 
 
 def test_gfx_font_codes():
@@ -1107,6 +1119,152 @@ def test_menu_draw_and_move():
         menu._draw(0, hints)  # away from the PicoCalc: draws nothing, no error
 
     _with_display(body)
+
+
+def _console(body):
+    # gfx's console drawing on a recording display, as when the launcher has
+    # started an app; writes go through pico_utils' screen writer, like print.
+    def run(fake, vt):
+        gfx.begin()
+        gfx.app()
+        del fake.calls[:]
+        before = list(vt.drawn)
+        body(fake, pu._ScreenTerm(vt).write)
+        check("nothing reached the terminal", vt.drawn, before)
+
+    _with_display(run)
+
+
+def test_console_text_and_colours():
+    def body(fake, write):
+        write(b"Hi")
+        check("row 1 band from the edge", fake.calls[0], ("fill_rect", 0, 0, 13, 12, pu.BLACK))
+        check("row 1 text", fake.calls[1], ("text", b"Hi", 1, 2, pu.WHITE))
+        del fake.calls[:]
+        write(b"\x1b[3;5H\x1b[38;5;14mok\x1b[0m")
+        check("row 3 col 5 band", fake.calls[0], ("fill_rect", 25, 24, 12, 10, pu.BLACK))
+        check("coloured text", fake.calls[1], ("text", b"ok", 25, 25, 14))
+        del fake.calls[:]
+        write(b"\x1b[H" + pu.title_bar("T", status=False).encode())
+        check("title bar spans the screen", fake.calls[0], ("fill_rect", 0, 0, 320, 12, pu.BLUE))
+        del fake.calls[:]
+        write(b"\x1b[7mR\x1b[27m")
+        check("reverse video", fake.calls[0][5], pu.WHITE)
+
+    _console(body)
+
+
+def test_console_wrap_newline_erase():
+    def body(fake, write):
+        con = gfx.CON
+        write(b"\x1b[2;1H" + b"a" * 60)
+        check("wrapped to row 3", (con.row, con.col), (3, 8))
+        write(b"\x1b[4;1H" + b"b" * 53 + b"\r\n")
+        check("a full row then CR LF: one line down", (con.row, con.col), (5, 1))
+        write(b"abc\b\x1b[K")
+        check("backspace then erase to the end", fake.calls[-1], ("fill_rect", 13, 44, 307, 10, pu.BLACK))
+        write(b"\x1b[5D")
+        check("readline moves back", con.col, 1)
+        write(b"\x1b[?25l")
+        check("?25l hides the console cursor", con.cursor, False)
+        write(b"\x1b[?25h")
+        check("?25h shows it", con.cursor, True)
+        write(b"\x1b[2J")
+        check("clear screen", fake.calls[-1], ("fill_rect", 0, 0, 320, 320, pu.BLACK))
+
+    _console(body)
+
+
+def test_console_split_writes():
+    def body(fake, write):
+        write(b"\x1b[3")
+        write(b"8;5;2mX")
+        check("escape split across writes", fake.calls[-1], ("text", b"X", 1, 2, 2))
+        write("è".encode()[:1])
+        write("è".encode()[1:] + b"!")
+        texts = [c for c in fake.calls if c[0] in ("text", "blit")]
+        check("utf-8 split across writes", texts[-1], ("text", b"\x8a!", 7, 2, 2))
+
+    _console(body)
+
+
+def test_console_specials_and_high_glyphs():
+    def body(fake, write):
+        write(pu.paint("\u2500" * pu.DISPLAY_WIDTH, pu.GREY).encode())
+        lines = [c for c in fake.calls if c[0] == "hline"]
+        if pu.DISPLAY_WIDTH == 52:  # PicoCalc width: the line spans the screen
+            check("separator edge to edge", lines, [("hline", 0, 5, 320, pu.GREY)])
+        del fake.calls[:]
+        write(b"\r\n" + pu.bar(0.3, 10).encode())
+        rects = [c for c in fake.calls if c[0] == "fill_rect" and c[4] == 8]
+        check("bar as two rectangles", [(r[3], r[5]) for r in rects], [(18, pu.GREEN), (42, pu.GREY)])
+        del fake.calls[:]
+        write("\r\nò".encode())
+        drawn = [c for c in fake.calls if c[0] in ("blit", "text")]
+        if gfx._framebuf is not None:
+            check("ò from the realigned table", drawn, [("blit", 1, 25)])
+        else:
+            check("ò as its code", drawn, [("text", b"\x95", 1, 25, pu.WHITE)])
+
+    _console(body)
+
+
+def test_console_scroll_and_cursor():
+    def body(fake, write):
+        con = gfx.CON
+        write(b"\x1b[31;1H\n")
+        check("still the last row", con.row, pu.CON_ROWS)
+        moves = [c for c in fake.calls if c[0] == "move_up"]
+        check("rows 3-31 up to 2-30, title kept", moves, [("move_up", 14 * 160, 24 * 160, 29 * 1600)])
+        check("last row cleared", fake.calls[-1], ("fill_rect", 0, 304, 320, 16, pu.BLACK))
+        del fake.calls[:]
+        con.waiting()
+        check("cursor drawn left of the cell", fake.calls[-1], ("fill_rect", 0, 305, 1, 8, pu.BWHITE))
+        write(b"x")
+        check("cursor erased first", fake.calls[1], ("fill_rect", 0, 305, 1, 8, 0))
+
+    _console(body)
+
+
+def test_gfx_native_matches_python():
+    # On the device gfx uses viper; the Python fallbacks must agree with it.
+    plain = "Città ─ █░ ò ù · ≈ ←→ “ok” ✓ x"
+    src = plain.encode()
+    out = bytearray(len(src) + 8)
+    res = gfx._to_codes(src, out, gfx._TABLES, gfx._NKEYS)
+    codes = bytes(out[: res & 0xFFFF])
+    check("codes", codes, b"Citt\x85 \xc4 \xdb\xb0 \x95 \x97 \xfa \xf7 \x1b\x1a \"ok\" ? x")
+    check("same as Python", codes, gfx._codes_py(plain))
+    check("flags", res >> 16, gfx.SPECIAL | gfx.HIGH)
+    res = gfx._to_codes("… 5€".encode(), out, gfx._TABLES, gfx._NKEYS)
+    if gfx.NATIVE:  # the console converts these in Python
+        check("several-character folds flagged", bool(res >> 16 & gfx.SLOW), True)
+    else:
+        check("folds in Python", bytes(out[: res & 0xFFFF]), b"... 5EUR")
+    check("kinds", gfx._kinds_of(b"a\xc4\x95", 0, 3, gfx._KINDS), gfx.SPECIAL | gfx.HIGH)
+    scans = (gfx._scan(b"ab\x1bc", 0, 4), gfx._scan(b"abc", 0, 3), gfx._scan("à\x1b".encode(), 0, 3))
+    check("scan: control index, non-ASCII bit", [(r >> 1, r & 1) for r in scans], [(2, 0), (3, 0), (2, 1)])
+    buf = bytearray(range(64))
+    gfx._move_up(buf, 8, 24, 32)
+    check("move up", bytes(buf[8:40]), bytes(range(24, 56)))
+
+
+def test_console_failure_falls_back():
+    class Broken:
+        def write(self, buf):
+            raise ValueError("bug")
+
+        def waiting(self):
+            raise ValueError("bug")
+
+    vt = FakeVt()
+    try:
+        pu._CONSOLE[0] = Broken()
+        term = pu._ScreenTerm(vt)
+        check("still reports bytes", term.write(b"ok"), 2)
+        check("drawn by the terminal", vt.drawn[-1], "ok")
+    finally:
+        pu._CONSOLE[0] = None
 
 
 def main():

@@ -12,10 +12,11 @@ from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
 from pico_utils import paint as _paint, pick as _pick, read_key as _read_key
 from pico_utils import read_line as _read_line, screen_header as _screen_header
 from pico_utils import wait_key as _wait_key
+from pico_utils import console_resume as _console_resume, console_suspend as _console_suspend
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-06.1"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000
@@ -199,11 +200,13 @@ def edit(path):
         _wait_key()
         return False
     gc.collect()
+    lent = _console_suspend()  # pye writes to the firmware terminal itself
     try:
         editor(path)
     finally:
         _ensure_screen()
         _clear_screen()
+        _console_resume(lent)
     return True
 
 

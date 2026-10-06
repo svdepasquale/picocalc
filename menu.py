@@ -15,7 +15,7 @@ from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-06.1"
+MODULE_VERSION = "2026-10-06.2"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 _BACK = ("q", "Q", "esc", "eof")
@@ -522,7 +522,7 @@ def _hints():
 
 
 def _launch(index):
-    gfx.end()
+    gfx.app()  # what the app prints is drawn by gfx's console
     try:
         _APPS[index][3]()
     except KeyboardInterrupt:
@@ -543,6 +543,7 @@ def _autoconnect():
     w = _load("wifi_manager")
     if not w.load_credentials():
         return
+    gfx.app()
     _screen_header("PicoCalc")
     print("Connecting Wi-Fi...  " + _paint("q", BYELLOW) + " skips while connecting")
     try:
@@ -559,12 +560,14 @@ def run(connect=True):
     REPL, and so does mpremote/Thonny writing on USB.
     connect: join a saved Wi-Fi network first."""
     _ensure_screen()
+    gfx.begin()
     note = ""
     try:
         _loop(connect)
     except _HostTakeover:
         note = " (USB host)"
-    gfx.end()
+    finally:
+        gfx.end()  # never leave the REPL on the console
     print("REPL{}. Menu: import go".format(note))
 
 
