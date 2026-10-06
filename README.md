@@ -15,7 +15,8 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Sy
 - `go.py` → `import go` opens the launcher
 - `main.py` → opens the launcher at boot where the firmware has no frozen `main.py`
 - `menu.py` → launcher: one key per app
-- `gfx.py` → draws straight on the screen (the launcher), over 10x faster than printing
+- `gfx.py` → draws straight on the screen: the launcher, and a screen console for what apps print
+- `gfx_native.py` → native-code (viper) helpers for that console
 - `files.py` → file manager for flash and the SD card
 - `apps.py` → runs the `.py` files in `/sd/apps` (or `/apps` on flash)
 - `snake.py` → Snake, best score kept on flash
@@ -86,8 +87,8 @@ not tried).
 
 ## Screen
 On the official PicoCalc firmware `pico_utils` reads the terminal size
-(53x40) and uses 52 columns and 34-line pages; elsewhere it falls back to
-32x8.
+(53x40) and uses 52 columns and 25-line pages, sized for the screen
+console below; elsewhere it falls back to 32x8.
 
 The firmware's terminal draws each character as a CP437 glyph, and its
 `write()` reports characters instead of bytes: the first accented
@@ -109,17 +110,27 @@ at power-on):
   `/sd/screen_<number>.bmp`.
 
 The terminal draws about 9,500 characters a second (its driver hands them
-to C one at a time from a Python loop), so printed screens are drawn once
-and moves repaint only what changes. The launcher skips the terminal and
-draws into the screen's memory with C calls (`gfx.py`): a full screen of
-text takes ~18 ms that way against ~220 ms printed.
+to C one at a time from a Python loop). While the launcher runs, nothing
+goes through it: the launcher draws into the screen's memory with C calls
+(`gfx.py`), and what the apps print is drawn the same way by gfx's screen
+console, a run of text at a time. Measured: a screen of 20 accented
+headlines in 66 ms instead of 307, a streamed AI answer 65 ms instead of
+164. The apps look like the launcher: a 12-pixel title bar, 10-pixel
+rows, highlight bars across the screen, separators as lines, solid bars.
+From the REPL (`q` in the launcher) the firmware terminal is back.
+
+One more firmware bug, in the screen's own font: three glyphs have seven
+rows instead of eight, so everything from code 0x8E on was drawn one to
+three rows up (`ò`, `ù`, `·`, the launcher's icons). gfx draws those from
+a realigned copy.
 
 ## Look
 Colours (the terminal's 16-colour palette), a title bar with time, Wi-Fi
 and battery, bars for RAM/flash/battery, a big block-digit clock and a
 progress bar for the countdown. `s.colors()` (System → `c`) shows the
-palette. The launcher is drawn rather than printed: a highlight bar, thin
-separator lines and the PICOCALC logo in square blocks.
+palette. Everything on screen is drawn rather than printed while the
+launcher runs: highlight bars, thin separator lines, solid bars, the
+PICOCALC logo in square blocks and the clock's digits as solid blocks.
 
 ## Keys
 Menus, viewers and pagers react to single keys, no Enter:
@@ -628,6 +639,7 @@ import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-04.1` for `files`, `apps`,
-`snake` and `music`, `2026-10-06.1` for `menu` and `pico_utils`,
-`2026-10-06.3` for `gfx`.
+Check on device with `<module>.ver()`: `2026-10-04.1` for `apps`, `snake`
+and `music`, `2026-10-06.1` for `files`, `clock_ntp`, `rss_news` and
+`gfx_native`, `2026-10-06.2` for `menu`, `2026-10-06.3` for `pico_utils`,
+`2026-10-06.7` for `gfx`.
