@@ -15,7 +15,7 @@ from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-06.2"
+MODULE_VERSION = "2026-10-07.1"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 _BACK = ("q", "Q", "esc", "eof")
@@ -128,9 +128,7 @@ def _weather():
     m = _load("weather")
 
     def body():
-        m.now()
-        print("")
-        m.forecast(3)
+        m.report(3)  # now and the forecast, one request
 
     while True:
         key = _choose("Weather", body, (("r", "refresh"), ("c", "city")))

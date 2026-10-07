@@ -198,8 +198,10 @@ Prompt and response size limits reduce memory pressure.
 - `ai.mem_clear()` → clear memory buffer
 - `ai.show_config()` → show model, key presence, endpoint, streaming
 - `ai.set_endpoint('http://192.168.1.20:8080/v1/chat/completions')` → any
-  OpenAI-compatible server (llama-server, LM Studio); no key needed there;
-  `ai.set_endpoint()` → back to OpenRouter
+  OpenAI-compatible server (llama-server, LM Studio); no key needed there,
+  and the OpenRouter key is only ever sent to OpenRouter;
+  `ai.set_endpoint(url, 'key')` if that server wants its own key (kept with
+  the URL, dropped when it changes); `ai.set_endpoint()` → back to OpenRouter
 - `ai.set_stream(False)` → wait for whole replies (for servers that don't stream)
 - `ai.ver()` / `ai.help()` / `ai.h()`
 
@@ -378,6 +380,8 @@ Default location: Rome (41.9, 12.5). Change with:
 
 Commands:
 - `import weather as m`
+- `m.report()` / `m.r()` → current weather and the 3-day forecast from one
+  request (the launcher's Weather screen)
 - `m.now()` / `m.w()` → current temperature, wind, conditions
 - `m.forecast()` / `m.fc()` → 3-day forecast (min/max temp + conditions)
 - `m.forecast(7)` / `m.fc(7)` → up to 7 days
@@ -632,14 +636,12 @@ import rss_news as n       # n.l() n.r(1) n.v(1) n.f() n.mf()
 import sys_status as s     # s.a() s.ram() s.df() s.ls() s.bat()
 import clock_ntp as c      # c.n() c.d() c.ts() c.tp() c.live()
 import notes as t          # t.l() t.s(1) t.v(1)
-import weather as m        # m.w() m.fc() m.sc('Rome')
+import weather as m        # m.r() m.w() m.fc() m.sc('Rome')
 import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
 import music               # music.m() music.p(path) music.volume(n)
 import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-04.1` for `apps`, `snake`
-and `music`, `2026-10-06.1` for `files`, `clock_ntp`, `rss_news` and
-`gfx_native`, `2026-10-06.2` for `menu`, `2026-10-06.3` for `pico_utils`,
-`2026-10-06.7` for `gfx`.
+Check on device with `<module>.ver()`: `2026-10-07.1` for the apps,
+`pico_utils` and `menu`, `2026-10-06.1` for `gfx_native`, `2026-10-06.7` for `gfx`.

@@ -117,7 +117,7 @@ All `.py` files **must** stay in the root directory — MicroPython on the Pico 
 These files are stored on the Pico's flash filesystem, not in the repo:
 
 - `/wifi_credentials.json` — saved Wi-Fi networks
-- `/openrouter_config.json` — AI key, model, system prompt, endpoint, stream flag
+- `/openrouter_config.json` — AI key, model, system prompt, endpoint (with its own key, if any), stream flag
 - `/rss_feeds.json` — RSS feed list + display settings
 - `/clock_config.json` — UTC offset, EU DST flag
 - `/notes_data.json` — saved notes/todo items
