@@ -29,12 +29,13 @@ See [CLAUDE.md](CLAUDE.md) for the full coding conventions.
 Minimum verification:
 
 ```bash
-# Host checks for parsers, formatters and helpers (CPython and MicroPython)
-python3 tests/test_logic.py
-micropython tests/test_logic.py   # brew install micropython
+# Host checks for parsers, formatters and helpers (CPython and MicroPython),
+# one file per area in tests/ (run_all.py runs them all)
+python3 tests/run_all.py
+micropython tests/run_all.py   # brew install micropython
 ```
 
-On-device testing via serial REPL is the primary validation. Please note the Pico revision and MicroPython build in your PR description.
+On-device testing via serial REPL is the primary validation (`tools/test_device.sh` runs the same test files on the board). Please note the Pico revision and MicroPython build in your PR description.
 
 ## Commit style
 
