@@ -327,8 +327,8 @@ def auto_connect_or_prompt(interactive=True):
         return None
     if joined:
         credentials[selected_ssid] = password
-        save_credentials(credentials)
-        print("OK. Saved.")
+        # save_credentials() prints what failed; the link is up either way
+        print("OK. Saved." if save_credentials(credentials) else "Connected, not saved.")
         print("IP:", wlan.ifconfig()[0])
         _sync_clock()
         return True

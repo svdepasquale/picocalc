@@ -10,7 +10,7 @@ from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-07.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -125,7 +125,9 @@ def set_location(lat, lon, name=""):
     config["lat"] = lat_f
     config["lon"] = lon_f
     config["name"] = _clip(str(name).strip(), 28) if name else ""
-    _save_config(config)
+    if not _save_config(config):
+        print("Location not saved.")  # after save_json's own error line
+        return False
     label = _location_label(config["name"], lat_f, lon_f)
     print("Location:", label)
     return True

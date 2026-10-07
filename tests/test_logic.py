@@ -919,6 +919,28 @@ def test_ai_key_only_to_openrouter():
     _with_ai({"api_key": "sk-or"}, run)
 
 
+# ── weather ─────────────────────────────────────
+
+import weather
+
+
+def test_weather_failed_save():
+    saved = weather.CONFIG_FILE
+    out = []
+    weather.print = lambda *a, **k: out.append(" ".join(str(x) for x in a))
+    try:
+        weather.CONFIG_FILE = _TMP
+        check("saved", weather.set_location(45.5, 9.25, "Milano"), True)
+        check("stored", weather._get_location(), (45.5, 9.25, "Milano"))
+        weather.CONFIG_FILE = _HERE + "/no_such_dir/weather.json"
+        check("failed save is no success", weather.set_location(41.75, 12.5, "Roma"), False)
+        check("said so", "Location not saved." in out, True)
+    finally:
+        weather.CONFIG_FILE = saved
+        del weather.print
+        _rm(_TMP)
+
+
 # ── synthesizer / calc ──────────────────────────
 
 import synthesizer as synth
@@ -1328,6 +1350,18 @@ def test_wifi_cancel_stops():
     check("first network only", wlan.joins, [("home", "p1")])
     check("said once, no Fail", [l for l in got["out"] if l == "Cancelled." or l.startswith("Fail")], ["Cancelled."])
     check("no chooser", (wlan.scans, got["shown"]), (1, []))
+
+
+def test_wifi_failed_save_reported():
+    wlan = FakeWlan([_scan_item(b"cafe", -50)], reach={"cafe": 3})
+
+    def run():
+        wifi_manager.CREDENTIALS_FILE = _HERE + "/no_such_dir/wifi.json"
+        check("joined all the same", wifi_manager.auto_connect_or_prompt(), True)
+
+    got = _with_wifi(wlan, run, keys=["1"], line="secret")
+    check("no false OK", "OK. Saved." in got["out"], False)
+    check("says not saved", "Connected, not saved." in got["out"], True)
 
 
 class FakePoll:
