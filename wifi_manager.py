@@ -16,7 +16,7 @@ CREDENTIALS_FILE = "wifi_credentials.json"
 CONNECT_TIMEOUT_SECONDS = 8
 CONNECT_POLL_INTERVAL_MS = 300
 DISPLAY_LINE_CHARS = 32
-MENU_NETWORK_LIMIT = 6
+MENU_NETWORK_LIMIT = 9  # one key each
 WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
@@ -137,6 +137,8 @@ def save_credentials(credentials):
 
 
 def scan_networks(wlan):
+    """(ssid, rssi, auth) for each name, strongest first: auth is the scan's
+    security field, 0 for an open network (None if the scan has none)."""
     results = wlan.scan()
     networks = []
     seen = set()
@@ -149,7 +151,7 @@ def scan_networks(wlan):
             continue
 
         seen.add(ssid)
-        networks.append((ssid, rssi))
+        networks.append((ssid, rssi, item[4] if len(item) > 4 else None))
 
     networks.sort(key=lambda x: x[1], reverse=True)
     return networks
@@ -225,6 +227,8 @@ def print_connection_status():
 
 
 def choose_network(networks):
+    """One key picks one of scan_networks()' first nine: its (ssid, rssi,
+    auth), or None."""
     if not networks:
         print("No WiFi networks.")
         return None
@@ -234,8 +238,8 @@ def choose_network(networks):
     print("---")
     visible_networks = networks[:MENU_NETWORK_LIMIT]
     lines = []
-    for index, (ssid, rssi) in enumerate(visible_networks, start=1):
-        lines.append("{}: {} {}dBm".format(index, ssid, rssi))
+    for index, (ssid, rssi, auth) in enumerate(visible_networks, start=1):
+        lines.append("{}: {} {}dBm{}".format(index, ssid, rssi, " open" if auth == 0 else ""))
     _paged_lines(lines, page_lines=MENU_NETWORK_LIMIT)
 
     if len(networks) > MENU_NETWORK_LIMIT:
@@ -252,7 +256,7 @@ def choose_network(networks):
         if key and len(key) == 1 and key.isdigit():
             selected_index = int(key)
             if 1 <= selected_index <= len(visible_networks):
-                return visible_networks[selected_index - 1][0]
+                return visible_networks[selected_index - 1]
 
 
 def connect_saved_networks(wlan, credentials):
@@ -266,7 +270,7 @@ def connect_saved_networks(wlan, credentials):
     for attempt in range(SCAN_RETRY_COUNT):
         try:
             networks = scan_networks(wlan)
-            scanned_ssids = [ssid for ssid, _ in networks]
+            scanned_ssids = [found[0] for found in networks]
             if scanned_ssids:
                 break
         except Exception as error:
@@ -329,19 +333,23 @@ def auto_connect_or_prompt(interactive=True):
         print("No selection.")
         return False
 
-    selected_ssid = choose_network(networks)
-    if not selected_ssid:
+    chosen = choose_network(networks)
+    if not chosen:
         print("No selection.")
         return False
+    selected_ssid, _, auth = chosen
 
     print("Network:", selected_ssid)  # whole: a 32-byte name fits the line
-    try:
-        password = _read_line("Password then Enter: ", mask="*")
-    except KeyboardInterrupt:
-        password = None
-    if not password:
-        print("No password.")
-        return False
+    if auth == 0:
+        password = ""  # open network: cyw43 joins with no key when it is empty
+    else:
+        try:
+            password = _read_line("Password then Enter: ", mask="*")
+        except KeyboardInterrupt:
+            password = None
+        if not password:
+            print("No password.")
+            return False
 
     print("Connecting...")
     status = connect_to_wifi(wlan, selected_ssid, password)

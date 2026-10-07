@@ -1404,6 +1404,26 @@ def test_wifi_says_why():
     check("connected screen", got["out"], ["WiFi: connected", "SSID: home", "IP: 10.0.0.7"])
 
 
+def test_wifi_open_networks_and_nine():
+    items = [_scan_item("net{}".format(i).encode(), -50 - i) for i in range(12)]
+    items.append(_scan_item(b"cafe", -40, auth=0))
+    check("auth kept", wifi_manager.scan_networks(FakeWlan(items[:1]))[0], ("net0", -50, 5))
+    wlan = FakeWlan(items, reach={"cafe": 3})
+
+    def run():
+        check("open joined", wifi_manager.auto_connect_or_prompt(), True)
+        check("saved with no key", wifi_manager.load_credentials(), {"cafe": ""})
+
+    got = _with_wifi(wlan, run, keys=["1"])
+    check("no password asked", got["prompts"], [])
+    check("empty key: open auth", wlan.joins, [("cafe", "")])
+    check("nine listed", len(got["shown"]), 9)
+    check("open marked", got["shown"][0], "1: cafe -40dBm open")
+    wlan = FakeWlan(items, reach={"net7": 3})
+    got = _with_wifi(wlan, wifi_manager.auto_connect_or_prompt, keys=["9"], line="pw")
+    check("9 picks the ninth", wlan.joins, [("net7", "pw")])
+
+
 class FakePoll:
     def __init__(self, ready):
         self.ready = ready
