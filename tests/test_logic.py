@@ -653,6 +653,25 @@ def test_format_result_float32():
         sc._SINGLE = saved
 
 
+def test_calc_huge_ints():
+    # str() of an int is quadratic (2**100000 took seconds on the device):
+    # from 10**1000 on none is printed, nor kept in the history.
+    saved = (sc._LAST, list(sc._HISTORY))
+    try:
+        big = 10 ** 1000
+        check("too large", sc._format_result(big), "too large to show")
+        check("negative too", sc._format_result(-big), "too large to show")
+        check("170! still shown", sc._format_result(sc._calc_factorial(170), 12), "7.257416e306")
+        check("2^1000 still shown", sc._format_result(2 ** 1000, 12), "1.071509e301")
+        del sc._HISTORY[:]
+        sc._store("10**1000", big)
+        check("ans keeps it", sc._LAST == big, True)
+        check("the history doesn't", sc._HISTORY, [])
+    finally:
+        sc._LAST = saved[0]
+        sc._HISTORY[:] = saved[1]
+
+
 # ── notes ───────────────────────────────────────
 
 import notes

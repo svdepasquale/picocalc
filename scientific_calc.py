@@ -17,11 +17,18 @@ _VARS = {}
 # rp2 floats are float32: ~7 significant digits, and every float from 2**24
 # up is integral (1e11 is 99999997952.0 there).
 _SINGLE = 16777217.0 == 16777216.0
+# str() of an int takes time quadratic in its digits: 2**100000 (30,103 of
+# them) kept the device busy for seconds, deaf to Ctrl+C; 1,000 digits cost
+# ~1/900 of that (unix port). Ints from here on are not printed: 2^1000 and
+# 170!, the largest factorial here (~300 digits), still are.
+_HUGE = 10 ** 1000
 
 
 def _store(expr, result):
     global _LAST
     _LAST = result
+    if isinstance(result, int) and not -_HUGE < result < _HUGE:
+        return  # ans has it; the history keeps no int that big
     _HISTORY.append({"expr": clip(str(expr), 60), "result": result})
     while len(_HISTORY) > MAX_HISTORY:
         del _HISTORY[0]
@@ -29,6 +36,8 @@ def _store(expr, result):
 
 def _fit_int(value, width):
     # Too many digits: scientific notation, never silently cut digits.
+    if not -_HUGE < value < _HUGE:
+        return clip("too large to show", width)
     text = str(value)
     if len(text) <= width:
         return text
@@ -347,7 +356,7 @@ def store(name, value=None):
         print("Var limit ({}).".format(MAX_VARS))
         return False
     _VARS[key] = value
-    print("{}={}".format(key, value))
+    print("{}={}".format(key, _format_result(value)))
     return True
 
 
@@ -357,7 +366,7 @@ def recall(name):
         print("Not found:", key)
         return None
     val = _VARS[key]
-    print("{}={}".format(key, val))
+    print("{}={}".format(key, _format_result(val)))
     return val
 
 
@@ -367,7 +376,7 @@ def variables():
         return {}
     lines = []
     for k, v in _VARS.items():
-        lines.append("{}={}".format(k, v))
+        lines.append("{}={}".format(k, _format_result(v)))
     paged_lines(lines)
     return _VARS
 
@@ -382,7 +391,7 @@ def last():
     if _LAST is None:
         print("No last result.")
         return None
-    print("Last:", _LAST)
+    print("Last:", _format_result(_LAST))
     return _LAST
 
 
