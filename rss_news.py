@@ -10,6 +10,7 @@ from pico_utils import http_request as _http_request, wrap_text as _wrap_text
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import poll_key as _poll_key
 from pico_utils import screen_header as _screen_header
+from pico_utils import DISPLAY_WIDTH
 from pico_utils import paint as _paint, BCYAN, BWHITE, GREY
 
 try:
@@ -91,10 +92,23 @@ def _resolve_cached_item(index):
     return _LAST_ITEMS[pos], pos
 
 
+def _short_date(date):
+    # Without the time zone, which the 30-column cut split ("08:15:00 +020"):
+    # "Sat, 04 Oct 2026 08:15:00 +0200" -> "Sat, 04 Oct 2026 08:15:00";
+    # Atom's "2026-10-04T08:15:00+02:00" -> "2026-10-04 08:15", as Miniflux.
+    if date[10:11] == "T":
+        return date[:16].replace("T", " ")
+    parts = date.split(" ")
+    if len(parts) > 2 and ":" in parts[-2]:
+        return " ".join(parts[:-1])
+    return date
+
+
 def _render_news_summary(item, pos, total, preview_chars=DEFAULT_PREVIEW_CHARS):
-    print(_paint(_clip(item.get("source", "?"), 18), BCYAN) + "  " + _paint(_clip(item.get("date", ""), 30), GREY))
+    date = _short_date(item.get("date", ""))
+    print(_paint(_clip(item.get("source", "?"), 18), BCYAN) + "  " + _paint(_clip(date, 30), GREY))
     print("")
-    _preview_print(_clip(item.get("title", "(no title)"), MAX_TITLE_CHARS), max_lines=3, fg=BWHITE)
+    _preview_print(_clip(item.get("title") or "(no title)", MAX_TITLE_CHARS), max_lines=3, fg=BWHITE)
     print("")
     preview = _clip(item.get("summary", ""), preview_chars)
     if preview:
@@ -111,7 +125,7 @@ def _render_news_detail(item, pos, total):
     if item.get("date"):
         lines.extend(_wrap_text("Date: {}".format(item["date"])))
     lines.append("Title:")
-    lines.extend(_wrap_text(item.get("title", "")))
+    lines.extend(_wrap_text(item.get("title") or "(no title)"))
 
     summary = item.get("summary", "")
     if summary:
@@ -216,6 +230,9 @@ def _clean_text(text, limit=MAX_SUMMARY_CHARS, html=True):
             # entity-escaped HTML (Atom type="html", many RSS descriptions)
             value = _strip_tags(value)
     value = " ".join(value.split())  # newlines and tabs too
+    # one character each that the screen draws as three: wrap_text and the
+    # limits must count three
+    value = value.replace("…", "...").replace("€", "EUR")
 
     if limit and len(value) > limit:
         return value[:limit]
@@ -439,7 +456,7 @@ def feeds():
         name = _clean_text(item.get("name", "?"), 28)
         url = _clean_text(item.get("url", ""), 120)
         lines.append("{}: {}".format(index, name))
-        lines.append("   {}".format(_clip(url, 58)))
+        lines.append("   {}".format(_clip(url, DISPLAY_WIDTH - 3)))
 
     _paged_lines(lines)
     return feed_list
@@ -617,7 +634,7 @@ def _fetch_feed(name, url, per_feed, requests):
         print("Out of memory.")
         return []
     elapsed = _ticks_diff(_ticks_ms(), start)
-    print("ok", len(parsed), "ms", elapsed)
+    print("ok", len(parsed), "items", elapsed, "ms")
 
     for item in parsed:
         item["source"] = name
@@ -693,7 +710,7 @@ def latest(feed=None, per_feed=None, show=True):
     # one paged list: per-item paging let the first items scroll off screen
     lines = []
     for index, item in enumerate(collected, start=1):
-        title = _clip(item.get("title", "(no title)"), MAX_TITLE_CHARS)
+        title = _clip(item.get("title") or "(no title)", MAX_TITLE_CHARS)
         summary = _clip(item.get("summary", ""), preview_chars)
         source = _clip(item.get("source", "?"), 18)
         lines.append("[{}] {}".format(index, source))

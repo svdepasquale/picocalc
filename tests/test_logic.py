@@ -470,7 +470,7 @@ def test_latest_pages_once():
     rss_news.check_wifi = lambda: True
     rss_news._http_module = lambda: object()
     rss_news._fetch_feed = lambda name, url, per, req: [
-        {"title": "T" + name, "summary": "S", "source": name, "link": "", "date": ""}
+        {"title": "" if name == "ANSA" else "T" + name, "summary": "S", "source": name, "link": "", "date": ""}
     ]
     rss_news._paged_lines = lambda lines, page_lines=8: pages.append(lines)
     rss_news._poll_key = lambda: None
@@ -483,6 +483,43 @@ def test_latest_pages_once():
     check("one paged call", len(pages), 1)
     check("item count", count, len(rss_news.DEFAULT_FEEDS))
     check("first line", pages[0][0], "[1] BBC World")
+    check("empty title shown as such", "(no title)" in pages[0], True)
+
+
+def test_dates_titles_folds():
+    check("rss zone dropped", rss_news._short_date("Sat, 04 Oct 2026 08:15:00 +0200"), "Sat, 04 Oct 2026 08:15:00")
+    check("named zone dropped", rss_news._short_date("Mon, 5 Oct 2026 8:15 GMT"), "Mon, 5 Oct 2026 8:15")
+    check("atom zone dropped", rss_news._short_date("2026-10-04T08:15:00+02:00"), "2026-10-04 08:15")
+    check("no zone", rss_news._short_date("Sat, 04 Oct 2026 08:15:00"), "Sat, 04 Oct 2026 08:15:00")
+    check("miniflux date", rss_news._short_date("2026-10-04 08:15"), "2026-10-04 08:15")
+    check("no date", rss_news._short_date(""), "")
+    # one character that the screen draws as three: counted as three
+    check("folds", rss_news._clean_text("Attesa… 5€ &#8230; &#8364;"), "Attesa... 5EUR ... EUR")
+    printed = []
+    previews = []
+    saved = rss_news._preview_print
+    rss_news.print = lambda *args, **kw: printed.append(" ".join([str(a) for a in args]))
+    rss_news._preview_print = lambda text, width=0, max_lines=0, fg=None: previews.append(text)
+    try:
+        item = {"source": "ANSA", "date": "Sat, 04 Oct 2026 08:15:00 +0200", "title": "", "summary": "S"}
+        rss_news._render_news_summary(item, 0, 1)
+    finally:
+        del rss_news.print
+        rss_news._preview_print = saved
+    check("summary date, no zone", ("08:15:00" in printed[0], "+02" in printed[0]), (True, False))
+    check("summary empty title", previews[0], "(no title)")
+    pages = []
+    saved = (rss_news.CONFIG_FILE, rss_news._paged_lines)
+    rss_news.CONFIG_FILE = _TMP
+    rss_news._paged_lines = lambda lines, page_lines=8: pages.append(lines)
+    try:
+        url = "https://example.com/" + "a" * 80
+        pu.save_json(_TMP, {"feeds": [{"name": "Lungo", "url": url}], "preview_chars": 110, "items_per_feed": 2})
+        rss_news.feeds()
+    finally:
+        rss_news.CONFIG_FILE, rss_news._paged_lines = saved
+        _rm(_TMP)
+    check("feed urls fit", max(len(x) for x in pages[0]) <= pu.DISPLAY_WIDTH, True)
 
 
 def test_latest_stops_between_feeds():
@@ -565,15 +602,21 @@ def test_fetch_feed_low_memory():
             raise MemoryError("memory allocation failed")
         return real_buffer(limit)
 
+    printed = []
     rss_news._buffer = tight_buffer
+    rss_news.print = lambda *args, **kw: printed.append(" ".join([str(a) for a in args]))
     req = ScriptedRequests([HttpResponse(200, body)])
     try:
         items = rss_news._fetch_feed("F", "https://f", 2, req)
     finally:
         rss_news._buffer = real_buffer
+        del rss_news.print
     check("16 KB retry", sizes, [rss_news.MAX_XML_BYTES, rss_news.MIN_XML_BYTES])
     check("one request", len(req.calls), 1)
     check("items read", [i["title"] for i in items], ["One"])
+    check("said so", "Low memory, reading 16 KB" in printed, True)
+    done = printed[-1].split(" ")
+    check("progress units", (done[:3], done[-1]), (["ok", "1", "items"], "ms"))
 
 
 # ── scientific_calc ─────────────────────────────
