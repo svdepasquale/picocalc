@@ -4,13 +4,13 @@ from pico_utils import load_json, save_json, ticks_ms as _ticks_ms, ticks_diff a
 from pico_utils import CLOCK_CONFIG_FILE as CONFIG_FILE
 from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _local_time_at
 from pico_utils import clock_synced as _clock_synced
-from pico_utils import poll_key as _poll_key, read_key as _read_key, sleep_ms as _sleep_ms
+from pico_utils import poll_key as _poll_key, sleep_ms as _sleep_ms, title_bar as _title_bar
 from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
 from pico_utils import paint as _paint, bar as _bar, block_rows as _block_rows, DISPLAY_WIDTH
 from pico_utils import BCYAN, BYELLOW, GREY, GREEN
 
 
-MODULE_VERSION = "2026-10-06.1"
+MODULE_VERSION = "2026-10-07.1"
 NTP_HOST = "pool.ntp.org"
 NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
@@ -268,24 +268,42 @@ def big_lines(text):
 def live():
     """Big clock that updates every second; any key returns."""
     _screen_header("Clock")
+    print("\x1b[11;1H " + _paint("any key", BYELLOW) + " back", end="")
     days = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    last = None
+    shown = minute = date = None
+    offset = 0
     try:
         while True:
-            lt, offset = _local_time()
-            if lt[5] != last:
-                last = lt[5]
+            now = int(time.time())
+            if now != shown:
+                shown = now
+                out = ""
+                if now // 60 != minute:
+                    # Once a minute: the zone from flash (summer time
+                    # switches on the minute) and the title bar's time,
+                    # Wi-Fi and battery.
+                    if minute is not None:
+                        out = "\x1b[1;1H" + _title_bar("Clock")
+                    minute = now // 60
+                    offset = _get_offset()
+                lt = time.gmtime(now + offset * 3600)
                 label = "UTC" + ("{:+d}".format(offset) if offset else "")
-                print("\x1b[3;1H\x1b[K {} {:04d}-{:02d}-{:02d}  {}".format(
-                    days[lt[6] % 7], lt[0], lt[1], lt[2], _paint(label, GREY)), end="")
+                line = " {} {:04d}-{:02d}-{:02d}  {}".format(
+                    days[lt[6] % 7], lt[0], lt[1], lt[2], _paint(label, GREY))
+                if line != date:
+                    date = line
+                    out += "\x1b[3;1H\x1b[K" + line
+                if out:
+                    print(out, end="")
                 rows = big_lines("{:02d}:{:02d}:{:02d}".format(lt[3], lt[4], lt[5]))
                 _block_rows(rows, 5, 1 + max(0, (DISPLAY_WIDTH - len(rows[0])) // 2), BCYAN)
-                print("\x1b[11;1H\x1b[K " + _paint("any key", BYELLOW) + " back", end="")
-            if _read_key(200) is not None:
+                print("\x1b[12;1H", end="")  # the cursor under the hint, where the REPL goes on
+            # 50 ms steps: each second shows within 50 ms of its start
+            if _poll_key() is not None:
                 break
+            _sleep_ms(50)
     except KeyboardInterrupt:
         pass
-    print()
     return True
 
 

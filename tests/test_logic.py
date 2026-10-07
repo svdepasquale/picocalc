@@ -1700,6 +1700,86 @@ def test_music_keys_ramp_memory():
         _unswap(music, saved)
 
 
+# clock
+
+
+class _ClockTime:
+    # clock_ntp's time module in virtual milliseconds
+    ms = 0
+
+    def time(self):
+        return _ClockTime.ms // 1000
+
+    def gmtime(self, secs):
+        import time
+
+        return time.gmtime(secs)
+
+
+def test_clock_live():
+    # Across the end of EU summer time (2026-10-25 01:00 UTC) and two
+    # minute changes.
+    import time
+    import clock_ntp
+
+    start = 1792889998 * 1000 + 500  # 00:59:58.5 UTC
+    switch = 1792890000 * 1000
+    stop = switch + 60200  # a key at 01:01:00.2
+    Clock = _ClockTime
+    Clock.ms = start
+
+    def sleep(ms):
+        Clock.ms += ms
+
+    def poll():
+        return "q" if Clock.ms >= stop else None
+
+    def read_key(timeout_ms=None):  # the old loop's wait
+        sleep(timeout_ms or 0)
+        return poll()
+
+    reads = []
+
+    def offset():
+        reads.append(Clock.ms)
+        return 2 if Clock.ms < switch else 1
+
+    drawn = []
+    out = []
+    saved = _swap(
+        clock_ntp,
+        {
+            "time": Clock(),
+            "_get_offset": offset,
+            "_sleep_ms": sleep,
+            "_poll_key": poll,
+            "_read_key": read_key,
+            "_block_rows": lambda rows, row, col, fg: drawn.append((Clock.ms, rows)),
+            "_screen_header": lambda title: out.append("<header>"),
+            "_title_bar": lambda title: "<" + title + " bar>",
+            "print": lambda *args, **kw: out.append("".join(str(a) for a in args)),
+        },
+    )
+    try:
+        check("live returns", clock_ntp.live(), True)
+    finally:
+        _unswap(clock_ntp, saved)
+    text = "".join(out)
+
+    def digits(secs):
+        t = time.gmtime(secs)
+        return clock_ntp.big_lines("{:02d}:{:02d}:{:02d}".format(t[3], t[4], t[5]))
+
+    check("zone read once a minute", len(reads), 3)
+    check("one draw a second", len(drawn), 63)
+    check("each within 50 ms of its second", max(ms % 1000 for ms, rows in drawn[1:]) < 50, True)
+    check("summer time to its last second", drawn[1][1], digits(switch // 1000 - 1 + 7200))
+    check("winter time from the switch", drawn[2][1], digits(switch // 1000 + 3600))
+    check("title bar repainted each minute", text.count("\x1b[1;1H<Clock bar>"), 2)
+    check("date line only when it changes", text.count("\x1b[3;1H"), 2)
+    check("hint printed once", text.count("any key"), 1)
+
+
 def test_status_text_battery():
     saved = (pu.battery, pu.wifi_connected, pu.clock_synced, pu.utc_offset_hours)
     try:
