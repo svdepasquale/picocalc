@@ -202,5 +202,8 @@ def run(namespace):
             FAILS.append(name)
             print("ERROR", name, repr(error))
     print("{} tests, {} failed".format(len(tests), len(FAILS)))
-    if FAILS:
+    # On the device sys.exit() in the raw REPL soft-resets MicroPython: the
+    # stock terminal comes back and the next mpremote connection stalled
+    # (power cycle). tools/test_device.sh reads the summary line instead.
+    if FAILS and sys.platform != "rp2":
         sys.exit(1)

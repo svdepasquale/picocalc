@@ -593,8 +593,9 @@ def test_console_backspace_and_edge():
         write(b"\b")
         check("backspace from there lands on the last column", con.col, pu.CON_COLS)
         del fake.calls[:]
-        write(b"\x1b[4;1H" + b"y" * (gfx._WIDE + 3))
-        check("a black run stops at its last cell", fake.calls[0][3], 1 + (gfx._WIDE + 3) * 6)
+        n = min(gfx._WIDE + 1, pu.CON_COLS)  # out past the apps' width, still on one row
+        write(b"\x1b[4;1H" + b"y" * n)
+        check("a black run stops at its last cell", fake.calls[0][3], 1 + n * 6)
         write(b"\x1b[3;1H\x1b[41m" + b"z" * gfx._WIDE + b"\x1b[0m")
         bars = [c for c in fake.calls if c[0] == "fill_rect" and c[5] == 1]
         check("a coloured run spans the screen", (bars[-1][1], bars[-1][3]), (0, 320))
