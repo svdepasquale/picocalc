@@ -1151,6 +1151,35 @@ def test_app_discover_and_run():
         _rmtree(folder)
 
 
+def test_go_run_or_imported():
+    # Executed rather than imported (mpremote run go.py, r on /go.py in
+    # Files), go was never in sys.modules: dropping itself must not raise.
+    class FakeMenu:
+        runs = 0
+
+        def run(self):
+            FakeMenu.runs += 1
+
+    saved = sys.modules.get("menu")
+    sys.modules["menu"] = FakeMenu()
+    root = pu.__file__.rsplit("/", 1)[0] if "/" in pu.__file__ else "."  # where the toolkit is
+    try:
+        sys.modules.pop("go", None)
+        with open(root + "/go.py") as f:
+            exec(f.read(), {"__name__": "__main__"})
+        check("run as a script", FakeMenu.runs, 1)
+        if sys.implementation.name == "micropython":  # CPython's import wants it kept
+            import go  # noqa: F401
+
+            check("import go opens it", FakeMenu.runs, 2)
+            check("and drops itself", "go" in sys.modules, False)
+    finally:
+        if saved is None:
+            sys.modules.pop("menu", None)
+        else:
+            sys.modules["menu"] = saved
+
+
 # files
 
 
