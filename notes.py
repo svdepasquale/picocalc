@@ -50,13 +50,22 @@ def _ts():
         return ""
 
 
+def _body(text):
+    # at most MAX_NOTE_CHARS, and says so when it cuts
+    body = str(text).strip()
+    if len(body) > MAX_NOTE_CHARS:
+        print("Too long: kept {} of {} chars.".format(MAX_NOTE_CHARS, len(body)))
+        body = body[:MAX_NOTE_CHARS]
+    return body
+
+
 def add(text, title=None):
     notes = _ensure()
     if len(notes) >= MAX_NOTES:
         print("Limit:", MAX_NOTES)
         return False
 
-    body = _clip(str(text).strip(), MAX_NOTE_CHARS)
+    body = _body(text)
     if body == "":
         print("Empty note.")
         return False
@@ -255,7 +264,7 @@ def edit(index, text):
     if pos < 0 or pos >= len(notes):
         print("Out of range.")
         return False
-    body = _clip(str(text).strip(), MAX_NOTE_CHARS)
+    body = _body(text)
     if body == "":
         print("Empty text.")
         return False

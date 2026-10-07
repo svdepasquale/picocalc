@@ -668,6 +668,30 @@ def test_note_detail_one_pager():
     check("body wrapped to the width", len(lines) > 8 and max(len(x) for x in lines) <= pu.DISPLAY_WIDTH, True)
 
 
+def test_note_cut_is_said():
+    # add() cut the body to MAX_NOTE_CHARS without a word
+    saved = (notes.DATA_FILE, notes._NOTES)
+    notes.DATA_FILE = _TMP
+    notes._NOTES = []
+    printed = []
+    notes.print = lambda *args, **kw: printed.append(" ".join([str(a) for a in args]))
+    try:
+        _rm(_TMP)
+        check("added", notes.add("x" * 900), True)
+        check("body cut", len(notes._NOTES[0]["b"]), notes.MAX_NOTE_CHARS)
+        check("said so", printed[0], "Too long: kept 800 of 900 chars.")
+        printed[:] = []
+        notes.add("short")
+        check("quiet when it fits", [p for p in printed if "Too long" in p], [])
+        printed[:] = []
+        notes.edit(2, "y" * 801)
+        check("edit says so too", printed[0], "Too long: kept 800 of 801 chars.")
+    finally:
+        del notes.print
+        notes.DATA_FILE, notes._NOTES = saved
+        _rm(_TMP)
+
+
 class ChunkRaw:
     # A response body handed out in small chunks, like a socket.
     def __init__(self, data, chunk=7):
