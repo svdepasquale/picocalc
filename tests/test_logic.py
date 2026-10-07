@@ -466,22 +466,88 @@ def test_latest_pages_once():
     saved_config = rss_news.CONFIG_FILE
     rss_news.CONFIG_FILE = _TMP  # defaults, not a device's saved feeds
     _rm(_TMP)
-    saved = (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines)
+    saved = (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines, rss_news._poll_key)
     rss_news.check_wifi = lambda: True
     rss_news._http_module = lambda: object()
     rss_news._fetch_feed = lambda name, url, per, req: [
         {"title": "T" + name, "summary": "S", "source": name, "link": "", "date": ""}
     ]
     rss_news._paged_lines = lambda lines, page_lines=8: pages.append(lines)
+    rss_news._poll_key = lambda: None
     try:
         count = rss_news.latest()
     finally:
-        rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines = saved
+        (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._paged_lines, rss_news._poll_key) = saved
         rss_news.CONFIG_FILE = saved_config
         _rm(_TMP)
     check("one paged call", len(pages), 1)
     check("item count", count, len(rss_news.DEFAULT_FEEDS))
     check("first line", pages[0][0], "[1] BBC World")
+
+
+def test_latest_stops_between_feeds():
+    # q (or Ctrl+C) between feeds stops and keeps what came; the old list
+    # is dropped before the first feed's buffer
+    saved_config = rss_news.CONFIG_FILE
+    rss_news.CONFIG_FILE = _TMP  # the three default feeds
+    _rm(_TMP)
+    saved = (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._poll_key, rss_news._LAST_ITEMS)
+    seen = []
+    keys = []
+
+    def fetch(name, url, per, req):
+        seen.append(len(rss_news._LAST_ITEMS))
+        return [{"title": "T" + name, "summary": "", "source": name, "link": "", "date": ""}]
+
+    def poll():
+        key = keys.pop(0)
+        if key == "ctrl-c":
+            raise KeyboardInterrupt
+        return key
+
+    rss_news.check_wifi = lambda: True
+    rss_news._http_module = lambda: object()
+    rss_news._fetch_feed = fetch
+    rss_news._poll_key = poll
+    try:
+        rss_news._LAST_ITEMS = [{"title": "old"}]
+        keys[:] = [None, "q"]
+        check("q stops after one feed", rss_news.latest(show=False), 1)
+        check("old list gone before the fetch", seen, [0])
+        check("q keeps what came", [i["title"] for i in rss_news._LAST_ITEMS], ["TBBC World"])
+        keys[:] = [None, None, "ctrl-c"]
+        try:
+            rss_news.latest(show=False)
+        except KeyboardInterrupt:
+            pass
+        check("ctrl-c keeps what came", len(rss_news._LAST_ITEMS), 2)
+    finally:
+        (rss_news.check_wifi, rss_news._http_module, rss_news._fetch_feed, rss_news._poll_key, rss_news._LAST_ITEMS) = saved
+        rss_news.CONFIG_FILE = saved_config
+        _rm(_TMP)
+
+
+def test_fetch_feed_low_memory():
+    # no 26 KB block free: a 16 KB read, allocated before the one request
+    body = b"<rss><channel><item><title>One</title></item></channel></rss>"
+    real_buffer = rss_news._buffer
+    sizes = []
+
+    def tight_buffer(limit):
+        sizes.append(limit)
+        if limit > rss_news.MIN_XML_BYTES:
+            raise MemoryError("memory allocation failed")
+        return real_buffer(limit)
+
+    rss_news._buffer = tight_buffer
+    req = ScriptedRequests([HttpResponse(200, body)])
+    try:
+        items = rss_news._fetch_feed("F", "https://f", 2, req)
+    finally:
+        rss_news._buffer = real_buffer
+    check("16 KB retry", sizes, [rss_news.MAX_XML_BYTES, rss_news.MIN_XML_BYTES])
+    check("one request", len(req.calls), 1)
+    check("items read", [i["title"] for i in items], ["One"])
 
 
 # ── scientific_calc ─────────────────────────────

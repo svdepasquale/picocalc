@@ -9,6 +9,7 @@ from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 from pico_utils import http_request as _http_request, wrap_text as _wrap_text
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import poll_key as _poll_key
 from pico_utils import screen_header as _screen_header
 from pico_utils import paint as _paint, BCYAN, BWHITE, GREY
 
@@ -25,6 +26,7 @@ MF_MAX_BYTES = 49152
 MF_MIN_BYTES = 16384  # retry size when no 48 KB block is free
 MF_CONTENT_CHARS = 6000  # of an entry's HTML, cleaned for its summary
 MAX_XML_BYTES = 26000
+MIN_XML_BYTES = 16384  # retry size when no 26 KB block is free
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
@@ -579,7 +581,13 @@ def _fetch_feed(name, url, per_feed, requests):
     start = _ticks_ms()
 
     try:
-        buf = _buffer(MAX_XML_BYTES)
+        try:
+            buf = _buffer(MAX_XML_BYTES)
+        except MemoryError:
+            # fragmented heap: the head of the feed holds the newest items,
+            # and no request has gone out yet
+            print("Low memory, reading", MIN_XML_BYTES // 1024, "KB")
+            buf = _buffer(MIN_XML_BYTES)
         response = _http_request(requests, "GET", url)
         status = response.status_code
         if status != 200:
@@ -657,7 +665,13 @@ def latest(feed=None, per_feed=None, show=True):
         return 0
 
     collected = []
+    # the cache from the start: the old list no longer holds memory while
+    # the buffers are allocated, and a stop (q, Ctrl+C) keeps what came
+    _LAST_ITEMS = collected
     for item in selected:
+        if _poll_key() in ("q", "Q", "esc"):
+            print("Stopped.")
+            break
         source_name = _clean_text(item.get("name", "feed"), 28)
         source_url = item.get("url", "")
         if _normalize_url(source_url) == "":
@@ -667,8 +681,6 @@ def latest(feed=None, per_feed=None, show=True):
         feed_items = _fetch_feed(source_name, source_url, items_per_feed, requests)
         if feed_items:
             collected.extend(feed_items)
-
-    _LAST_ITEMS = collected
 
     if not collected:
         print("No news.")
