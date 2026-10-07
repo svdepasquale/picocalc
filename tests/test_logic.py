@@ -375,6 +375,48 @@ def test_parse_feed():
     check("summary", items[0]["summary"], "First")
 
 
+def test_parse_feed_blocks():
+    # RSS 1.0 lists its links in <items> before the items: the image's title
+    # stood in for the newest story
+    rdf = (
+        '<rdf:RDF><channel><title>Site</title><items><rdf:Seq><rdf:li resource="http://a"/>'
+        "</rdf:Seq></items></channel><image><title>Site logo</title></image>"
+        '<item rdf:about="http://a"><title>Newest</title><link>http://a</link></item>'
+        '<item rdf:about="http://b"><title>Second</title></item></rdf:RDF>'
+    )
+    items = rss_news._parse_feed(rdf, 2)
+    check("rss 1.0 newest first", [i["title"] for i in items], ["Newest", "Second"])
+    check("rss 1.0 link", items[0]["link"], "http://a")
+    atom = (
+        '<feed><title>F</title><entry xml:lang="it"><title>A</title></entry>'
+        "<entry>\n<title>B</title><updated>2026-10-04T08:15:00Z</updated></entry></feed>"
+    )
+    items = rss_news._parse_feed(atom, 4)
+    check("atom entries", [i["title"] for i in items], ["A", "B"])
+    check("atom date", items[1]["date"], "2026-10-04T08:15:00Z")
+    rss = "<rss><item><title>T</title><pubDate>Sat, 04 Oct 2026 08:15:00 +0200</pubDate></item></rss>"
+    check("pubDate in any case", rss_news._parse_feed(rss, 1)[0]["date"], "Sat, 04 Oct 2026 08:15:00 +0200")
+
+
+def test_fetch_feed_parse_out_of_memory():
+    # a MemoryError while parsing skips that feed; it escaped latest() and
+    # lost the feeds already read
+    body = b"<rss><channel><item><title>One</title></item></channel></rss>"
+    real_parse = rss_news._parse_feed
+
+    def no_memory(xml, count):
+        raise MemoryError("memory allocation failed")
+
+    rss_news._parse_feed = no_memory
+    try:
+        req = ScriptedRequests([HttpResponse(200, body)])
+        check("parse oom skips the feed", rss_news._fetch_feed("F", "https://f", 2, req), [])
+    finally:
+        rss_news._parse_feed = real_parse
+    req = ScriptedRequests([HttpResponse(200, body)])
+    check("feed parsed", [i["title"] for i in rss_news._fetch_feed("F", "https://f", 2, req)], ["One"])
+
+
 def test_latest_pages_once():
     pages = []
     saved_config = rss_news.CONFIG_FILE

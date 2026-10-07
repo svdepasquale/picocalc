@@ -29,7 +29,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-06.1"
+MODULE_VERSION = "2026-10-07.1"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -214,26 +214,33 @@ def _extract_first_tag(block, tag_names, block_lower=None):
     return ""
 
 
-def _find_blocks(xml_lower, xml_orig, tag_name, max_items):
+def _find_blocks(xml, tag_name, max_items):
+    # Searches the feed text itself: item and entry tags are lowercase in any
+    # valid feed, and a lower() copy of it cost 26 KB.
     blocks = []
     open_token = "<" + tag_name
     close_token = "</" + tag_name + ">"
     pos = 0
 
     while len(blocks) < max_items:
-        start = xml_lower.find(open_token, pos)
+        start = xml.find(open_token, pos)
         if start < 0:
             break
 
-        gt_pos = xml_lower.find(">", start)
+        pos = start + len(open_token)
+        after = xml[pos : pos + 1]
+        if after != ">" and not after.isspace():
+            continue  # "<items>" (RSS 1.0's list of links) is not an "<item>"
+
+        gt_pos = xml.find(">", pos)
         if gt_pos < 0:
             break
 
-        end = xml_lower.find(close_token, gt_pos + 1)
+        end = xml.find(close_token, gt_pos + 1)
         if end < 0:
             break
 
-        blocks.append(xml_orig[gt_pos + 1 : end])
+        blocks.append(xml[gt_pos + 1 : end])
         pos = end + len(close_token)
 
     return blocks
@@ -242,15 +249,12 @@ def _find_blocks(xml_lower, xml_orig, tag_name, max_items):
 def _parse_feed(xml_text, max_items):
     items = []
     gc.collect()
-    xml_lower = xml_text.lower()
-    item_blocks = _find_blocks(xml_lower, xml_text, "item", max_items)
+    item_blocks = _find_blocks(xml_text, "item", max_items)
     mode = "rss"
 
     if not item_blocks:
-        item_blocks = _find_blocks(xml_lower, xml_text, "entry", max_items)
+        item_blocks = _find_blocks(xml_text, "entry", max_items)
         mode = "atom"
-
-    del xml_lower
 
     for block in item_blocks:
         block_lower = block.lower()
@@ -564,15 +568,16 @@ def _fetch_feed(name, url, per_feed, requests):
         print("Empty feed.")
         return []
 
-    parsed = _parse_feed(xml_text, per_feed)
+    try:
+        parsed = _parse_feed(xml_text, per_feed)
+    except MemoryError:  # this feed only: the ones before it stay
+        print("Out of memory.")
+        return []
     elapsed = _ticks_diff(_ticks_ms(), start)
     print("ok", len(parsed), "ms", elapsed)
 
     for item in parsed:
         item["source"] = name
-
-    del xml_text
-    gc.collect()
 
     return parsed
 
