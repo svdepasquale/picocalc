@@ -193,18 +193,21 @@ def _strip_tags(text):
     return "".join(out)
 
 
-def _clean_text(text, limit=MAX_SUMMARY_CHARS):
-    # str() of a str copies it on MicroPython
-    value = text if isinstance(text, str) else str(text)
+def _clean_text(text, limit=MAX_SUMMARY_CHARS, html=True):
+    # html=False for titles, which are plain text: entities decoded, angle
+    # brackets kept (the strips took "<T>" from "Option&lt;T&gt;" and "<u8>"
+    # from a CDATA "Vec<u8>")
+    value = text if isinstance(text, str) else str(text)  # str() copies a str
 
     if "<![CDATA[" in value:
         value = value.replace("<![CDATA[", "")
         value = value.replace("]]>", "")
 
-    value = _strip_tags(value)
+    if html:
+        value = _strip_tags(value)
     if "&" in value:
         value = _decode_entities(value)
-        if "<" in value:
+        if html and "<" in value:
             # entity-escaped HTML (Atom type="html", many RSS descriptions)
             value = _strip_tags(value)
     value = " ".join(value.split())  # newlines and tabs too
@@ -312,7 +315,7 @@ def _parse_feed(xml_text, max_items):
                             if href_end > href_start:
                                 link = tag_text[href_start:href_end]
 
-        clean_title = _clean_text(title, MAX_TITLE_CHARS)
+        clean_title = _clean_text(title, MAX_TITLE_CHARS, html=False)
         clean_summary = _clean_text(summary, MAX_SUMMARY_CHARS)
         clean_link = _clean_text(link, 220)
         clean_date = _clean_text(date, 80)
@@ -759,7 +762,7 @@ def _mf_items(data):
         content = str(entry.get("content") or "")
         items.append(
             {
-                "title": _clean_text(entry.get("title", ""), MAX_TITLE_CHARS),
+                "title": _clean_text(entry.get("title", ""), MAX_TITLE_CHARS, html=False),
                 "summary": _clean_text(content[:6000], MAX_SUMMARY_CHARS),
                 "link": str(entry.get("url", "")),
                 "date": str(entry.get("published_at", ""))[:16].replace("T", " "),

@@ -392,6 +392,20 @@ def test_decode_entities():
     check("adjacent", rss_news._decode_entities("&lt;&lt;x&gt;"), "<<x>")
 
 
+def test_titles_keep_angle_brackets():
+    # a title is plain text: the tag strips took "<T>" and a CDATA "<u8>"
+    clean = rss_news._clean_text("Rust&#39;s Option&lt;T&gt;", rss_news.MAX_TITLE_CHARS, html=False)
+    check("escaped title", clean, "Rust's Option<T>")
+    xml = (
+        "<rss><item><title><![CDATA[Vec<u8> explained]]></title>"
+        "<description><![CDATA[<p>Bytes</p>]]></description></item>"
+        "<item><title>A &lt;b&gt; tag</title></item></rss>"
+    )
+    items = rss_news._parse_feed(xml, 2)
+    check("cdata title", [i["title"] for i in items], ["Vec<u8> explained", "A <b> tag"])
+    check("summary still stripped", items[0]["summary"], "Bytes")
+
+
 def test_parse_feed():
     xml = (
         "<rss><channel><title>C</title>"
@@ -662,6 +676,8 @@ def test_miniflux_fetch_and_mark():
         check("not sent twice", rss_news.mf_done(), False)
 
     _with_miniflux(run)
+    items = rss_news._mf_items({"entries": [{"title": "Vec<u8> &amp; co", "content": "<p>x</p>"}]})
+    check("miniflux title keeps <", items[0]["title"], "Vec<u8> & co")
 
 
 def test_miniflux_large_and_401():
