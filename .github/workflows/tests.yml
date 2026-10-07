@@ -1,9 +1,9 @@
 name: Tests
 
-# The host checks in tests/test_logic.py, on CPython and on MicroPython's unix
-# port. There is nothing to build: the toolkit is plain .py files copied to the
-# Pico, which compiles them itself. The display, keyboard and audio are tested
-# on the device only.
+# The host checks in tests/test_*.py (one file per area, over tests/harness.py),
+# on CPython and on MicroPython's unix port. There is nothing to build: the
+# toolkit is plain .py files copied to the Pico, which compiles them itself. The
+# display, keyboard and audio are tested on the device only.
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Host tests on CPython
-        run: python3 tests/test_logic.py
+        run: python3 tests/run_all.py
 
   micropython:
     runs-on: ubuntu-latest
@@ -47,4 +47,10 @@ jobs:
           mkdir -p ~/micropython-bin
           cp "$src/ports/unix/build-standard/micropython" ~/micropython-bin/
       - name: Host tests on MicroPython
-        run: ~/micropython-bin/micropython tests/test_logic.py
+        run: |
+          status=0
+          for file in tests/test_*.py; do
+            echo "== $file"
+            ~/micropython-bin/micropython "$file" || status=1
+          done
+          exit $status
