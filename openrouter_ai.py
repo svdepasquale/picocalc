@@ -137,17 +137,26 @@ def set_system_prompt(text):
     return _set_config_value("system_prompt", text, "Empty prompt.", "System prompt saved.")
 
 
-def set_endpoint(url=None):
+def _is_openrouter(endpoint):
+    # The only server the OpenRouter key is sent to.
+    return endpoint.startswith("https://openrouter.ai/")
+
+
+def set_endpoint(url=None, key=None):
     """OpenAI-compatible chat URL, e.g. a local llama-server or LM Studio:
     set_endpoint('http://192.168.1.20:8080/v1/chat/completions').
-    No argument: back to OpenRouter."""
+    key: that server's own API key, if it wants one; the OpenRouter key
+    only ever goes to OpenRouter. No argument: back to OpenRouter."""
     config = _load_config()
     value = str(url).strip() if url else ""
     if value and not (value.startswith("http://") or value.startswith("https://")):
         print("Invalid URL.")
         return False
+    config.pop("endpoint_key", None)  # a key belongs to the URL it came with
     if value:
         config["endpoint"] = value
+        if key:
+            config["endpoint_key"] = str(key).strip()
     elif "endpoint" in config:
         del config["endpoint"]
     if not _save_config(config):
@@ -465,13 +474,16 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
         return None
 
     config = _load_config()
-    api_key = config.get("api_key", "")
     endpoint = config.get("endpoint") or OPENROUTER_URL
+    # Never the OpenRouter key to another server (a LAN one gets it in clear
+    # over http): a custom endpoint sends the key set with it, if any.
+    to_openrouter = _is_openrouter(endpoint)
+    api_key = config.get("api_key" if to_openrouter else "endpoint_key", "")
     stream = bool(config.get("stream", True))
     selected_model = model or config.get("model", DEFAULT_MODEL)
     system_prompt = config.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
 
-    if api_key == "" and "openrouter.ai" in endpoint:
+    if api_key == "" and to_openrouter:
         print("No API key. Use set_api_key(...)")
         return None
 
@@ -630,7 +642,7 @@ def help():
     print("mem_status()  Show memory info")
     print("mem_clear()   Clear memory")
     print("show_config() Show settings")
-    print("set_endpoint(url) Local server")
+    print("set_endpoint(url,key) Local AI")
     print("set_stream(b) Stream replies")
     print("tip: import openrouter_ai as ai")
 

@@ -889,6 +889,36 @@ def test_ai_body_is_utf8_bytes():
     check("prompt round-trips", ai.json.loads(data.decode())["messages"][-1]["content"], prompt)
 
 
+def test_ai_key_only_to_openrouter():
+    lan = "http://192.168.1.20:8080/v1/chat/completions"
+
+    def auth(config):
+        req = ScriptedRequests([HttpResponse(200, _SSE_OK)])
+
+        def run():
+            ai._http_module = lambda: req
+            ai.ask("hi")
+
+        _with_ai(config, run)
+        return req.calls[0][2]["headers"].get("Authorization") if req.calls else "no request"
+
+    check("OpenRouter gets its key", auth({"api_key": "sk-or"}), "Bearer sk-or")
+    check("LAN server: not the OpenRouter key", auth({"api_key": "sk-or", "endpoint": lan}), None)
+    check("LAN server: its own key", auth({"api_key": "sk-or", "endpoint": lan, "endpoint_key": "lan"}), "Bearer lan")
+    check("look-alike URL", auth({"api_key": "sk-or", "endpoint": "http://x/?openrouter.ai"}), None)
+
+    def run():
+        ai.set_endpoint(lan, "lan")
+        check("key kept with its URL", ai._load_config().get("endpoint_key"), "lan")
+        ai.set_endpoint("http://10.0.0.2/v1/chat/completions")
+        check("new URL drops the old key", "endpoint_key" in ai._load_config(), False)
+        ai.set_endpoint(lan, "lan")
+        ai.set_endpoint()
+        check("back to OpenRouter", ai._load_config(), {"api_key": "sk-or"})
+
+    _with_ai({"api_key": "sk-or"}, run)
+
+
 # ── synthesizer / calc ──────────────────────────
 
 import synthesizer as synth
