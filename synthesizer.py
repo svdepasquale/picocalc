@@ -15,7 +15,7 @@ from pico_utils import (
 )
 
 
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-07.1"
 
 # ── audio ───────────────────────────────────────
 SAMPLE_RATE = 22050
@@ -171,47 +171,45 @@ def _play_freq_i2s(freq, dur_ms):
     is_saw = _wave == "saw"
     written = 0
 
-    try:
-        while written < total:
-            n = min(CHUNK, total - written)
-            for i in range(n):
-                ix = (phase >> 16) & 0xFF
+    # no except: Ctrl+C reaches seq(), rtttl() and piano(), which stop on it
+    while written < total:
+        n = min(CHUNK, total - written)
+        for i in range(n):
+            ix = (phase >> 16) & 0xFF
 
-                if is_sine:
-                    smp = tbl[ix]
-                elif is_sq:
-                    smp = 32767 if ix < 128 else -32767
-                elif is_saw:
-                    smp = ix * 257 - 32768
+            if is_sine:
+                smp = tbl[ix]
+            elif is_sq:
+                smp = 32767 if ix < 128 else -32767
+            elif is_saw:
+                smp = ix * 257 - 32768
+            else:
+                if ix < 128:
+                    smp = (ix << 9) - 32768
                 else:
-                    if ix < 128:
-                        smp = (ix << 9) - 32768
-                    else:
-                        smp = 32767 - ((ix - 128) << 9)
+                    smp = 32767 - ((ix - 128) << 9)
 
-                smp = (smp * vol_s) >> 8
+            smp = (smp * vol_s) >> 8
 
-                # attack / release envelope
-                pos = written + i
-                if pos < att:
-                    smp = smp * pos // att
-                elif pos > total - rel:
-                    smp = smp * (total - pos) // rel
+            # attack / release envelope
+            pos = written + i
+            if pos < att:
+                smp = smp * pos // att
+            elif pos > total - rel:
+                smp = smp * (total - pos) // rel
 
-                if smp < 0:
-                    smp += 65536
+            if smp < 0:
+                smp += 65536
 
-                off = i << 1
-                buf[off] = smp & 0xFF
-                buf[off + 1] = (smp >> 8) & 0xFF
-                # only bits 16-23 index the table; 24 bits keep phase a
-                # small int (a 32-bit mask allocated a long int per sample)
-                phase = (phase + phase_inc) & 0xFFFFFF
+            off = i << 1
+            buf[off] = smp & 0xFF
+            buf[off + 1] = (smp >> 8) & 0xFF
+            # only bits 16-23 index the table; 24 bits keep phase a
+            # small int (a 32-bit mask allocated a long int per sample)
+            phase = (phase + phase_inc) & 0xFFFFFF
 
-            audio.write(mv[:n << 1])
-            written += n
-    except KeyboardInterrupt:
-        pass
+        audio.write(mv[:n << 1])
+        written += n
 
     return True
 
@@ -230,9 +228,7 @@ def _play_freq_pwm(freq, dur_ms):
             pwm.duty_u16(duty)
         try:
             _sleep_ms(int(dur_ms))
-        except KeyboardInterrupt:
-            pass
-        finally:
+        finally:  # silent and released, and Ctrl+C goes on to stop the tune
             for pwm in pwms:
                 pwm.duty_u16(0)
             for pwm in pwms:

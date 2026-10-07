@@ -799,6 +799,75 @@ def test_rtttl_parse():
     check("bad song", synth._rtttl_parse("nope"), None)
 
 
+class _RecPWM:
+    # machine.PWM stand-in that records what is done to the speaker pins
+    log = []
+
+    def __init__(self, pin):
+        self.pin = pin
+
+    def freq(self, hz):
+        _RecPWM.log.append(("freq", self.pin))
+
+    def duty_u16(self, duty):
+        _RecPWM.log.append(("duty", self.pin, duty))
+
+    def deinit(self):
+        _RecPWM.log.append(("deinit", self.pin))
+
+
+class _RecMachine:
+    PWM = _RecPWM
+
+
+_RecMachine.Pin = lambda n: n
+
+
+class _InterruptedI2S:
+    def write(self, data):
+        raise KeyboardInterrupt
+
+
+def test_synth_ctrl_c_stops_the_tune():
+    def interrupted(ms):
+        raise KeyboardInterrupt
+
+    out = []
+    saved = (sys.modules.get("machine"), synth._sleep_ms, synth._poll_key, synth._init_audio, synth._use_pwm)
+    sys.modules["machine"] = _RecMachine
+    synth._sleep_ms = interrupted
+    synth._poll_key = lambda: None
+    synth.print = lambda *args, **kw: out.append(" ".join(str(a) for a in args))
+    del _RecPWM.log[:]
+    try:
+        try:
+            synth._play_freq_pwm(440, 50)
+            check("pwm: Ctrl+C reaches the caller", "returned", "KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        silent = [("duty", 26, 0), ("duty", 27, 0), ("deinit", 26), ("deinit", 27)]
+        check("pwm: silenced and released first", _RecPWM.log[-4:], silent)
+        del _RecPWM.log[:]
+        check("seq stops", synth.seq("C D E F"), False)
+        check("on its first note", (_RecPWM.log.count(("deinit", 26)), out[-1]), (1, "Stopped."))
+        synth._init_audio = lambda: _InterruptedI2S()
+        try:
+            synth._play_freq_i2s(440, 50)
+            check("i2s: Ctrl+C reaches the caller", "returned", "KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        synth._use_pwm = False
+        synth._sleep_ms = lambda ms: None
+        check("rtttl stops", synth.rtttl("t:d=4,o=5,b=120:c,d,e"), False)
+    finally:
+        if saved[0] is None:
+            sys.modules.pop("machine", None)
+        else:
+            sys.modules["machine"] = saved[0]
+        synth._sleep_ms, synth._poll_key, synth._init_audio, synth._use_pwm = saved[1:]
+        del synth.print
+
+
 def test_calc_ans_chaining():
     saved = sc._LAST
     try:
