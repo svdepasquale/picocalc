@@ -443,7 +443,7 @@ def title_bar(title, status=True):
 # BS, TAB. Other sequences are dropped. Row 1 is the 12-pixel title row and
 # never scrolls; rows 2-31 are 10 pixels; 53 columns; wrap at the edge.
 
-_X0 = 1  # left of column 1; the free pixel column left of a cell is the cursor's
+_X0 = 1  # left of column 1
 
 
 _WIDE = _pu.DISPLAY_WIDTH  # the apps' line width: a run reaching it spans the screen
