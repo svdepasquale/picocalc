@@ -1256,6 +1256,45 @@ def test_files_paths_and_listing():
         _rmtree(folder)
 
 
+def _ctrl_c(fn, *args):
+    # fn(*args) with Ctrl+C typed: what it returns, or that it let it through.
+    keys_from(b"\x03")
+    try:
+        return fn(*args)
+    except KeyboardInterrupt:
+        return "KeyboardInterrupt"
+
+
+def test_files_prompts_and_delete():
+    # Ctrl+C at a prompt cancels instead of leaving Files; a folder with
+    # something in it is said so before any y/n.
+    import files
+
+    folder = _HERE + "/_tmp_files"
+    _rmtree(folder)
+    os.mkdir(folder)
+    saved = files.edit
+    try:
+        _write(folder + "/a.txt", "x")
+        check("Ctrl+C at y/n", _ctrl_c(files.delete, folder + "/a.txt"), False)
+        check("still there", files._exists(folder + "/a.txt"), True)
+        check("Ctrl+C at a name", _ctrl_c(files._ask_name, "Name, then Enter: "), None)
+        files.edit = lambda path: True  # quit the editor without saving
+        keys_from(b"new.txt\r")
+        check("nothing saved, nothing to highlight", files._new_file(folder), None)
+        files.edit = lambda path: _write(path, "")
+        keys_from(b"new.txt\r")
+        check("saved: highlighted", files._new_file(folder), "new.txt")
+        os.mkdir(folder + "/full")
+        _write(folder + "/full/f.txt", "x")
+        keys_from(b"y")
+        check("folder not empty", (files.delete(folder + "/full", True), files._exists(folder + "/full")), (False, True))
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        files.edit = saved
+        _rmtree(folder)
+
+
 def test_files_text():
     import files
 

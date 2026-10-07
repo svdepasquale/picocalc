@@ -234,8 +234,23 @@ def run(path):
 
 def delete(path, is_dir=False):
     """Remove a file or an empty folder after a y."""
+    if is_dir:
+        count = 0
+        try:
+            for _ in _ilistdir(path):  # counted as they come: no list of names
+                count += 1
+        except OSError:
+            pass  # rmdir() says why
+        if count:
+            print("Folder not empty ({} item{}).".format(count, "" if count == 1 else "s"))
+            _wait_key()
+            return False
     print("Delete {}{}? y/n".format(_short(path, 40), "/" if is_dir else ""))
-    if _read_key() not in ("y", "Y"):
+    try:
+        key = _read_key()
+    except KeyboardInterrupt:  # Ctrl+C cancels, as n does
+        key = "esc"
+    if key not in ("y", "Y"):
         return False
     try:
         if is_dir:
@@ -250,7 +265,11 @@ def delete(path, is_dir=False):
 
 
 def _ask_name(prompt):
-    name = _read_line(prompt)
+    try:
+        name = _read_line(prompt)
+    except KeyboardInterrupt:  # Ctrl+C cancels, as Esc does
+        print()
+        return None
     if not name:
         return None
     name = name.strip()
@@ -279,7 +298,7 @@ def _new_file(folder):
         _wait_key()
         return None
     edit(path)
-    return name
+    return name if _exists(path) else None  # quit unsaved: the highlight stays
 
 
 def _new_folder(folder):
