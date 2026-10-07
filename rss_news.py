@@ -38,15 +38,43 @@ DEFAULT_FEEDS = [
 ]
 
 _LAST_ITEMS = []
-_TYPO_ENTITIES = (
-    ("&hellip;", "..."),
-    ("&lsquo;", "'"),
-    ("&rsquo;", "'"),
-    ("&ldquo;", '"'),
-    ("&rdquo;", '"'),
-    ("&ndash;", "-"),
-    ("&mdash;", "-"),
-)
+# Named entities decoded in feed text (others stay as written). Signs the
+# screen font lacks are written in ASCII; letters it lacks fold on screen.
+_ENTITIES = {
+    "amp": "&",
+    "lt": "<",
+    "gt": ">",
+    "quot": '"',
+    "apos": "'",
+    "nbsp": " ",
+    "hellip": "...",
+    "lsquo": "'",
+    "rsquo": "'",
+    "ldquo": '"',
+    "rdquo": '"',
+    "ndash": "-",
+    "mdash": "-",
+    "laquo": "\xab",
+    "raquo": "\xbb",
+    "deg": "\xb0",
+    "middot": "\xb7",
+    "euro": "EUR",
+    "copy": "(c)",
+    "reg": "(R)",
+    "times": "x",
+    "agrave": "\xe0",
+    "egrave": "\xe8",
+    "eacute": "\xe9",
+    "igrave": "\xec",
+    "ograve": "\xf2",
+    "ugrave": "\xf9",
+    "Agrave": "\xc0",
+    "Egrave": "\xc8",
+    "Eacute": "\xc9",
+    "Igrave": "\xcc",
+    "Ograve": "\xd2",
+    "Ugrave": "\xd9",
+}
 
 
 def _resolve_cached_item(index):
@@ -104,40 +132,35 @@ def _save_config(config):
 
 
 def _decode_entities(text):
-    value = str(text)
-    if "&" not in value:
-        return value
-    value = value.replace("&amp;", "&")
-    value = value.replace("&lt;", "<")
-    value = value.replace("&gt;", ">")
-    value = value.replace("&quot;", '"')
-    value = value.replace("&apos;", "'")
-    value = value.replace("&nbsp;", " ")
-    for entity, repl in _TYPO_ENTITIES:
-        value = value.replace(entity, repl)
-    if "&#" in value:
-        out = []
-        i = 0
-        while i < len(value):
-            if value[i:i + 2] == "&#" and i + 2 < len(value):
-                sc = value.find(";", i + 2)
-                if sc > 0 and sc - i < 10:
-                    ref = value[i + 2:sc]
-                    try:
-                        if ref and ref[0] in ("x", "X"):
-                            cp = int(ref[1:], 16)
-                        else:
-                            cp = int(ref)
-                        if 0 < cp < 0x10000:
-                            out.append(chr(cp))
-                            i = sc + 1
-                            continue
-                    except (ValueError, IndexError):
-                        pass
-            out.append(value[i])
-            i += 1
-        value = "".join(out)
-    return value
+    # "&amp;" first, as before: escaped HTML writes its own entities as
+    # "&amp;#39;". Then one pass over the pieces after each "&": the old
+    # loop indexed the str per character, and on MicroPython every index
+    # rescans a str from its start.
+    parts = iter(text.replace("&amp;", "&").split("&"))
+    out = [next(parts)]
+    for part in parts:
+        semi = part.find(";", 1, 10)
+        rep = None
+        if semi > 0:
+            name = part[:semi]
+            rep = _ENTITIES.get(name)
+            if rep is None and name[0] == "#":
+                try:
+                    if name[1] in "xX":
+                        code = int(name[2:], 16)
+                    else:
+                        code = int(name[1:])
+                except (ValueError, IndexError):
+                    code = 0
+                if 0 < code < 0x110000:
+                    rep = chr(code)
+        if rep is None:
+            out.append("&")
+            out.append(part)
+        else:
+            out.append(rep)
+            out.append(part[semi + 1 :])
+    return "".join(out)
 
 
 def _strip_tags(text):
@@ -171,19 +194,20 @@ def _strip_tags(text):
 
 
 def _clean_text(text, limit=MAX_SUMMARY_CHARS):
-    value = str(text)
+    # str() of a str copies it on MicroPython
+    value = text if isinstance(text, str) else str(text)
 
     if "<![CDATA[" in value:
         value = value.replace("<![CDATA[", "")
         value = value.replace("]]>", "")
 
-    value = value.replace("\n", " ").replace("\r", " ").replace("\t", " ")
     value = _strip_tags(value)
-    value = _decode_entities(value)
-    if "<" in value:
-        # entity-escaped HTML (Atom type="html", many RSS descriptions)
-        value = _strip_tags(value)
-    value = " ".join(value.split())
+    if "&" in value:
+        value = _decode_entities(value)
+        if "<" in value:
+            # entity-escaped HTML (Atom type="html", many RSS descriptions)
+            value = _strip_tags(value)
+    value = " ".join(value.split())  # newlines and tabs too
 
     if limit and len(value) > limit:
         return value[:limit]

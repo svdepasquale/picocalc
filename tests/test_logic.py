@@ -375,6 +375,23 @@ def test_strip_tags():
     check("no tag", rss_news._strip_tags("a > b"), "a > b")
 
 
+def test_decode_entities():
+    check(
+        "named entities",
+        rss_news._clean_text("Citt&agrave; e caff&egrave; &laquo;ok&raquo; &euro;5"),
+        "Citt\xe0 e caff\xe8 \xabok\xbb EUR5",
+    )
+    check("capitals", rss_news._clean_text("&Egrave; &Agrave; &eacute;"), "\xc8 \xc0 \xe9")
+    check("signs", rss_news._clean_text("20&deg; &copy; &reg; 2&times;3 a&middot;b"), "20\xb0 (c) (R) 2x3 a\xb7b")
+    check("numeric", rss_news._clean_text("&#39;&#x27;&#X27; &#8217;"), "''' ’")
+    check("past 0xFFFF", rss_news._clean_text("&#x1F600;"), chr(0x1F600))
+    kept = "&#; &#x; &#abc; &#99999999; &#0; &#65 &foo; R&D; a & b"
+    check("not entities", rss_news._clean_text(kept), kept)
+    check("escaped html's entities", rss_news._clean_text("Rust&amp;#39;s AT&amp;amp;T"), "Rust's AT&T")
+    check("escaped html's tags", rss_news._clean_text("&amp;lt;b&amp;gt;x&amp;lt;/b&amp;gt;"), "x")
+    check("adjacent", rss_news._decode_entities("&lt;&lt;x&gt;"), "<<x>")
+
+
 def test_parse_feed():
     xml = (
         "<rss><channel><title>C</title>"
