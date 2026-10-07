@@ -12,7 +12,7 @@ from pico_utils import ticks_ms as _ticks_ms, title_bar as _title_bar
 from pico_utils import BGREEN, BRED, BYELLOW, GREEN, GREY
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-07.1"
 CONFIG_FILE = "snake.json"
 START_MS = 150  # time per step at the start
 FASTEST_MS = 60
@@ -52,9 +52,15 @@ def new_game(width, height, rng=random):
 
 
 def turn(state, heading):
-    """Queue a turn; two fit, so a quick up-then-left lands within a step."""
-    if len(state["turns"]) < 2:
-        state["turns"].append(heading)
+    """Queue a turn; two fit, so a quick up-then-left lands within a step.
+    A press along the last queued heading (or the current one), or back on
+    it, changes nothing and takes no slot."""
+    turns = state["turns"]
+    dx, dy = turns[-1] if turns else state["dir"]
+    if heading in ((dx, dy), (-dx, -dy)):
+        return
+    if len(turns) < 2:
+        turns.append(heading)
 
 
 def place_food(state, rng=random):

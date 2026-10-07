@@ -1197,6 +1197,24 @@ def test_snake_food_placement():
     check("no food left", s["food"], None)
 
 
+def test_snake_turn_queue():
+    import snake
+
+    R, U, L, D = (1, 0), (0, -1), (-1, 0), (0, 1)
+    s = snake.new_game(10, 5, FakeRng([0, 0]))
+    for heading in (R, R, U):  # right, right, up within one step
+        snake.turn(s, heading)
+    snake.step(s)
+    check("repeats take no slot: the up lands", s["snake"][-1], (5, 1))
+    s = snake.new_game(10, 5, FakeRng([0, 0]))
+    for heading in (U, D, U, L):
+        snake.turn(s, heading)
+    check("reverse and repeat of the queued turn dropped", s["turns"], [U, L])
+    snake.step(s)
+    snake.step(s)
+    check("up then left", s["snake"][-1], (4, 1))
+
+
 # music
 
 
