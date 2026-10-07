@@ -23,7 +23,7 @@ from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-07.2"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 2048  # samples per DMA buffer: 93 ms at 22,050 Hz
 SD_BAUDRATE = 8000000  # while playing: 214 KB/s measured, same data up to 20 MHz
@@ -272,6 +272,26 @@ def _pacer(on):
     mem32[_reg(_PACER, _CSR)] = 1 if on else 0
 
 
+def _drain(ch):
+    # A track stopped mid-buffer leaves a channel busy and chained to the
+    # other. Clearing its CTRL makes CHAIN_TO 0 (a channel the display or
+    # Wi-Fi owns), and aborting a busy channel is erratum RP2350-E5: after a
+    # stop mid-track the next SD read hung the device (USB dead, measured
+    # 2026-10-07). So both channels finish their buffers unpaced and
+    # unchained, into a scratch word instead of the PWM, and close() then
+    # aborts idle channels. Returns the scratch word: keep it until closed.
+    from array import array
+
+    scratch = array("I", (0,))
+    for dma in ch:
+        dma.write = scratch
+        dma.ctrl = dma.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3F, chain_to=dma.channel)
+    start = _ticks_ms()
+    while any(dma.active() for dma in ch) and _ticks_diff(_ticks_ms(), start) < 20:
+        pass
+    return scratch
+
+
 # ── playing ─────────────────────────────────────
 
 
@@ -444,14 +464,15 @@ def play_file(path, name=None):
             if not free:
                 _sleep_ms(5)
     finally:
-        _pacer(False)
+        _pacer(False)  # no more requests: a busy channel waits mid-buffer
         for dma in ch:
             dma.irq(handler=None)
-            dma.ctrl = 0  # EN off on both first, so neither chain-triggers the other
+        scratch = _drain(ch)
         for dma in ch:
-            # close() aborts after clearing EN; active(0) aborts an enabled
-            # channel, which can spin forever on the RP2350 (erratum E5)
+            # close() aborts: only idle channels by now (_drain); active(0)
+            # aborts an enabled one, which can spin forever (erratum E5)
             dma.close()
+        scratch = None
         if pins is not None:
             _ramp(mem32[_reg(_AUDIO, _CC)], 0)
         if sd is not None:

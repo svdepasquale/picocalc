@@ -326,7 +326,13 @@ class _SimDMA:
         self.reload = n
 
     def pack_ctrl(self, size=2, inc_read=True, inc_write=False, treq_sel=0, chain_to=0, irq_quiet=True):
-        return 1 | chain_to << 1
+        return 1 | chain_to << 1 | (treq_sel == 0x3F) << 7  # bit 7: unpaced
+
+    def active(self):
+        if self.busy and self.ctrl & 0x80:  # unpaced: runs out at once
+            self.left = 0
+            self.busy = False
+        return self.busy
 
     def config(self, read=None, write=None, count=None, ctrl=None, trigger=False):
         self.read = read
@@ -339,8 +345,10 @@ class _SimDMA:
         self.handler = handler
 
     def close(self):
-        if self.busy and self.ctrl & 1:
-            _SIM[0].errors.append("abort of an enabled channel")
+        if self.busy:
+            _SIM[0].errors.append("abort of a busy channel")
+        if self.ctrl >> 1 & 0x1F != self.channel:
+            _SIM[0].errors.append("closed while chained to another channel")
 
     def start(self, sim):
         if self.buf[0] & 0xFFFF != sim.heard + 1:
