@@ -368,6 +368,8 @@ def wrap_text(text, width=DISPLAY_WIDTH):
     source = str(text).replace("\r\n", "\n").replace("\r", "\n")
     wrapped = []
     for paragraph in source.split("\n"):
+        # leading spaces (code, an indented list) stay on the first line
+        indent = min(len(paragraph) - len(paragraph.lstrip(" ")), width // 2)
         paragraph = paragraph.strip()
         if paragraph == "":
             wrapped.append("")
@@ -375,7 +377,10 @@ def wrap_text(text, width=DISPLAY_WIDTH):
 
         parts = []
         parts_len = 0
-        for word in paragraph.split(" "):
+        words = paragraph.split(" ")
+        if indent:
+            words[0] = " " * indent + words[0]
+        for word in words:
             if word == "":
                 continue
             if not parts:

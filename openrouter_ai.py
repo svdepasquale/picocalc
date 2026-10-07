@@ -385,12 +385,15 @@ def _error_text(err):
 
 class _StreamPrinter:
     # Prints streamed text with word wrap: a word is held until it ends.
+    # Spaces that open a line are kept (code indentation, as wrap_text does
+    # up to half the width); other runs of spaces print as one.
     def __init__(self, width=DISPLAY_WIDTH, out=None):
         self.width = width
         self.out = out or (lambda text: print(text, end=""))
         self.col = 0
         self.word = ""
         self.space = False
+        self.lead = True  # nothing but spaces on this line yet
 
     def __call__(self, text):
         for ch in text:
@@ -399,10 +402,17 @@ class _StreamPrinter:
                 self.out("\n")
                 self.col = 0
                 self.space = False
+                self.lead = True
             elif ch == " ":
-                self._flush()
-                self.space = self.col > 0
+                if self.lead:
+                    if self.col < self.width // 2:
+                        self.out(" ")
+                        self.col += 1
+                else:
+                    self._flush()
+                    self.space = self.col > 0
             else:
+                self.lead = False
                 self.word += ch
                 if len(self.word) >= self.width:
                     self._flush()
@@ -428,6 +438,7 @@ class _StreamPrinter:
         if self.col:
             self.out("\n")
             self.col = 0
+            self.lead = True
 
 
 def _sse_text(raw, emit):

@@ -118,6 +118,20 @@ def test_net_error_words():
         check("net_error " + name, pu.net_error(error), want)
 
 
+def test_wrap_text():
+    code = "def f(x):\n    if x:\n        return 1"
+    check("code keeps its indentation", pu.wrap_text(code, 32), ["def f(x):", "    if x:", "        return 1"])
+    check("indent on the first line only", pu.wrap_text("  - one two three", 10), ["  - one", "two three"])
+    check("indent at most half", pu.wrap_text(" " * 12 + "x", 10), ["     x"])
+    check("indented long word", pu.wrap_text("  abcdefghijkl", 10), ["  abcdefgh", "ijkl"])
+    # as before
+    check("words wrap", pu.wrap_text("one two three four", 9), ["one two", "three", "four"])
+    check("gaps collapse", pu.wrap_text("a  b   c ", 10), ["a b c"])
+    check("tab is no indent", pu.wrap_text("\tx", 10), ["x"])
+    check("blank lines kept", pu.wrap_text("a\r\n\n  \nb", 10), ["a", "", "", "b"])
+    check("long word split", pu.wrap_text("x" * 25, 10), ["x" * 10, "x" * 10, "x" * 5])
+
+
 # keys: feed raw bytes the way the PicoCalc driver emits them
 
 
@@ -869,6 +883,15 @@ def test_stream_printer_wraps():
     printer("ee four\nfive")
     printer.close()
     check("wrapped lines", "".join(out), "one two\nthree four\nfive\n")
+
+
+def test_stream_printer_keeps_indent():
+    out = []
+    printer = ai._StreamPrinter(width=20, out=out.append)
+    printer("def f(x):\n  ")  # an indent split across two deltas
+    printer("  if x:\n        return  1")
+    printer.close()
+    check("indentation streamed", "".join(out), "def f(x):\n    if x:\n        return 1\n")
 
 
 _SSE_OK = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
