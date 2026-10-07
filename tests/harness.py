@@ -14,6 +14,11 @@
 # the ones that start with an underscore: whatever they use here is public.
 # No hardware needed: machine/network/picocalc are stubbed where used.
 
+# On the device the REPL's globals outlive a run (tools/test_device.sh resets
+# between files anyway): no test of an earlier file may run again here.
+for _name in [k for k in globals() if k.startswith("test_")]:
+    del globals()[_name]
+
 # io, os, sys and pu reach the area files through import *
 import io
 import os
