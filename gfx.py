@@ -18,7 +18,7 @@ try:
 except ImportError:  # CPython
     _framebuf = None
 
-MODULE_VERSION = "2026-10-06.7"
+MODULE_VERSION = "2026-10-07.1"
 
 WIDTH = 320
 HEIGHT = 320
@@ -284,6 +284,8 @@ def suspend():
 
 
 def resume():
+    if _FB[0] is None:  # end() came in between: begin() takes the screen again
+        return
     _term_write("\x1b[?25l\x1b[H")
     _pu._CONSOLE[0] = CON
     CON.clear()
@@ -489,6 +491,25 @@ class Console:
 
     # ── the hook ──
 
+    def draw(self, buf):
+        # pico_utils' screen writer calls this; True once drawn. Small on
+        # purpose (a frame over 11 words costs ~240 us): print's line end, a
+        # lone "\r\n", is handled here, the rest by write(). A Ctrl+C landing
+        # in here is kept for the next key read (raised out of the writer,
+        # it would make dupterm detach the screen); other errors fall back
+        # to the terminal.
+        try:
+            if len(buf) == 2 and buf[0] == 13 and buf[1] == 10 and not self.carry and self.beam is None:
+                if _FB[0] is not None:
+                    self._newline(_FB[0])
+            else:
+                self.write(buf)
+        except KeyboardInterrupt:
+            _pu._INTERRUPTED[0] = True
+        except Exception:
+            return False
+        return True
+
     def write(self, buf):
         # One function for the common cases: a call with this many locals
         # takes ~240 us here (MicroPython puts the frame on the heap), a
@@ -530,7 +551,8 @@ class Console:
                         fg = self.fg
                         bg = self.bg
                     x0 = 0 if col == 1 else x
-                    fb.fill_rect(x0, self.y, (WIDTH if col + m > _WIDE else x + m * CHAR_W) - x0, self.h, bg)
+                    x1 = WIDTH if bg != BLACK and col + m > _WIDE else x + m * CHAR_W
+                    fb.fill_rect(x0, self.y, x1 - x0, self.h, bg)
                     fb.text(data if m == n else data[i:j], x, self.ty, fg)
                     self.col = col + m
                 i = j
@@ -564,7 +586,7 @@ class Console:
             elif code == 0x0D:
                 self.col = 1
             elif code == 0x08:
-                self.col = max(1, min(self.col, CON_COLS) - 1)
+                self._back(1)
             elif code == 0x09:
                 self.col = min(CON_COLS, (min(self.col, CON_COLS) - 1) // 8 * 8 + 9)
             i += 1
@@ -598,15 +620,26 @@ class Console:
         if fb is None or not self.cursor or self.beam is not None:
             return
         x = _X0 + (min(self.col, CON_COLS) - 1) * CHAR_W
-        y = self.ty + CHAR_H
-        under = fb.pixel(x, y)
+        y = self.ty + CHAR_H  # this row's last line, then the next row's first
+        self.beam = (x, y, fb.pixel(x, y), fb.pixel(x, y + 1))
         fb.fill_rect(x, y, CHAR_W - 1, 2, BWHITE)
-        self.beam = (x, y, under)
 
     def _beam_off(self, fb):
-        x, y, under = self.beam
-        fb.fill_rect(x, y, CHAR_W - 1, 2, under)
+        x, y, top, bottom = self.beam
+        fb.hline(x, y, CHAR_W - 1, top)
+        fb.hline(x, y + 1, CHAR_W - 1, bottom)
         self.beam = None
+
+    def _back(self, n):
+        # n columns left; past column 1 on to the end of the row above (not
+        # into the title row), as a typed line that wrapped is erased. From
+        # the wrap position (after the last column) the first step is the
+        # last column.
+        col = self.col - n
+        while col < 1 and self.row > 2:
+            col += CON_COLS
+            self._goto(self.row - 1)
+        self.col = max(1, col)
 
     # ── text ──
 
@@ -642,9 +675,11 @@ class Console:
             pos += k
 
     def _put(self, fb, codes, flags):
-        # A run on the current row from the current column. A run from column
-        # 1, or out to the apps' width, also paints the screen's edge: title
-        # and highlight bars span it, and nothing of an older bar stays.
+        # A run on the current row from the current column. From column 1 it
+        # also paints the left edge; a coloured run out to the apps' width
+        # paints to the right edge (title and highlight bars span the
+        # screen). A black one stops at its last cell: a typed character in
+        # column 53 must survive the space that erases column 52.
         col = self.col
         n = len(codes)
         x = col * CHAR_W - CHAR_W + _X0
@@ -655,10 +690,11 @@ class Console:
             fg = self.fg
             bg = self.bg
         x0 = 0 if col == 1 else x
-        x1 = WIDTH if col + n > _WIDE else x + n * CHAR_W
+        reaches = col + n > _WIDE
+        x1 = WIDTH if bg != BLACK and reaches else x + n * CHAR_W
         fb.fill_rect(x0, self.y, x1 - x0, self.h, bg)
         if flags:
-            _draw_codes(fb, codes, x, self.ty, fg, flags, self.y, self.h, col == 1, x1 == WIDTH)
+            _draw_codes(fb, codes, x, self.ty, fg, flags, self.y, self.h, col == 1, reaches)
         else:
             fb.text(codes, x, self.ty, fg)
         if self.bold:
@@ -731,7 +767,7 @@ class Console:
         elif final == 0x43:  # C
             self.col = min(CON_COLS, min(self.col, CON_COLS) + max(first, 1))
         elif final == 0x44:  # D
-            self.col = max(1, min(self.col, CON_COLS) - max(first, 1))
+            self._back(max(first, 1))
         elif final == 0x47:  # G
             self.col = min(max(first, 1), CON_COLS)
         elif final == 0x64:  # d

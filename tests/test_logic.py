@@ -2853,7 +2853,9 @@ def test_console_wrap_newline_erase():
         write(b"abc\b\x1b[K")
         check("backspace then erase to the end", fake.calls[-1], ("fill_rect", 13, 44, 307, 10, pu.BLACK))
         write(b"\x1b[5D")
-        check("readline moves back", con.col, 1)
+        check("moving back past column 1 goes up a row", (con.row, con.col), (4, 51))
+        write(b"\x1b[2;3H\x1b[9D")
+        check("never into the title row", (con.row, con.col), (2, 1))
         write(b"\x1b[?25l")
         check("?25l hides the console cursor", con.cursor, False)
         write(b"\x1b[?25h")
@@ -2915,7 +2917,7 @@ def test_console_scroll_and_cursor():
         con.waiting()
         check("cursor under the cell", fake.calls[-1], ("fill_rect", 1, 313, 5, 2, pu.BWHITE))
         write(b"x")
-        check("cursor erased first", fake.calls[1], ("fill_rect", 1, 313, 5, 2, 0))
+        check("cursor erased first, each line its own colour", fake.calls[1:3], [("hline", 1, 313, 5, 0), ("hline", 1, 314, 5, 0)])
 
     _console(body)
 
@@ -2969,10 +2971,74 @@ def test_console_fits_pick_and_pager():
     check("a page plus header and prompt fits", 2 + (pu.CON_ROWS - 6) + 1 <= pu.CON_ROWS, True)
 
 
+def test_console_backspace_and_edge():
+    def body(fake, write):
+        con = gfx.CON
+        write(b"\x1b[3;1H" + b"x" * pu.CON_COLS)
+        check("after the last column: a wrap is due", (con.row, con.col), (3, pu.CON_COLS + 1))
+        write(b"\b")
+        check("backspace from there lands on the last column", con.col, pu.CON_COLS)
+        del fake.calls[:]
+        write(b"\x1b[4;1H" + b"y" * (gfx._WIDE + 3))
+        check("a black run stops at its last cell", fake.calls[0][3], 1 + (gfx._WIDE + 3) * 6)
+        write(b"\x1b[3;1H\x1b[41m" + b"z" * gfx._WIDE + b"\x1b[0m")
+        bars = [c for c in fake.calls if c[0] == "fill_rect" and c[5] == 1]
+        check("a coloured run spans the screen", (bars[-1][1], bars[-1][3]), (0, 320))
+
+    _console(body)
+
+
+def test_screen_writer_keeps_ctrl_c():
+    vt = FakeVt()
+    term = pu._ScreenTerm(vt)
+    try:
+        pu._CONSOLE[0] = None
+        check("no poll support, no error", term.ioctl(3, 1), 0)
+        con = gfx.Console()
+        gfx._FB[0] = FakeDisplay()
+        pu._CONSOLE[0] = con
+
+        def stop(buf):
+            raise KeyboardInterrupt
+
+        con.write = stop  # a Ctrl+C from USB landing inside the console
+        check("the writer still reports bytes", term.write(b"ab"), 2)
+        check("kept", pu._INTERRUPTED[0], True)
+        buf = bytearray(1)
+        check("handed back to input() as the byte", (term.readinto(buf), buf[0]), (1, 3))
+        pu._INTERRUPTED[0] = True
+        raised = False
+        try:
+            pu._poll_byte()
+        except KeyboardInterrupt:
+            raised = True
+        check("or raised at the next key read", (raised, pu._INTERRUPTED[0]), (True, False))
+    finally:
+        pu._CONSOLE[0] = None
+        pu._INTERRUPTED[0] = False
+        gfx._FB[0] = None
+
+
+def test_wrap_counts_three_for_folds():
+    check("… and € counted as drawn", pu.wrap_text("ab… 5€", 40), ["ab... 5EUR"])
+
+
+def test_resume_after_end_stays_off():
+    def body(fake, vt):
+        gfx.begin()
+        gfx.end()
+        gfx.resume()
+        check("no console without a screen", pu._CONSOLE[0], None)
+
+    _with_display(body)
+
+
 def test_console_failure_falls_back():
     class Broken:
-        def write(self, buf):
-            raise ValueError("bug")
+        beam = None
+
+        def draw(self, buf):
+            return False  # what Console.draw() answers when write() raised
 
         def waiting(self):
             raise ValueError("bug")

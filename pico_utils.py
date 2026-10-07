@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-07.2"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -144,11 +144,25 @@ except (ImportError, AttributeError):
     _IOBase = object
 
 
+_INTERRUPTED = [False]  # a Ctrl+C caught in the screen writer, raised at the next key read
+
+
+def _screen_text(buf):
+    if isinstance(buf, str):
+        return buf
+    try:
+        return str(buf, "utf-8")
+    except Exception:
+        return "".join(chr(b) if b < 128 else "?" for b in buf)
+
+
 class _ScreenTerm(_IOBase):
     # The firmware's vt.write() returns characters, not bytes: on non-ASCII
     # output MicroPython re-sends the tail of the UTF-8 sequence, decode()
     # raises and dupterm detaches screen and keyboard until reset. This
-    # stream reports bytes, never raises on bad UTF-8, and maps to CP437.
+    # stream reports bytes, never raises (a Ctrl+C from USB included, which
+    # lands wherever Python is: it is kept for the next key read), and maps
+    # to CP437. While gfx owns the screen its console draws instead.
     _cp437_screen = True
 
     def __init__(self, term):
@@ -156,36 +170,40 @@ class _ScreenTerm(_IOBase):
 
     def write(self, buf):
         con = _CONSOLE[0]
-        if con is not None:
-            try:
-                con.write(buf)
-                return len(buf)
-            except Exception:
-                pass  # drawn by the terminal instead: raising would detach the screen
-        if isinstance(buf, str):
-            text = buf
-        else:
-            try:
-                text = str(buf, "utf-8")
-            except Exception:
-                text = "".join(chr(b) if b < 128 else "?" for b in buf)
-        self._term.wr(to_cp437(text))
+        if con is not None and con.draw(buf):
+            return len(buf)
+        try:
+            self._term.wr(to_cp437(_screen_text(buf)))
+        except KeyboardInterrupt:
+            _INTERRUPTED[0] = True
+        except Exception:
+            pass
         return len(buf)
 
     def readinto(self, buf):
         # The keyboard MCU answers EIO while the PicoCalc is off (Pico on USB
         # power only), and a firmware bug can raise on Ctrl+U: raising here
-        # would make dupterm detach the screen.
-        con = _CONSOLE[0]
-        if con is not None:
-            try:
-                con.waiting()  # input() reads: show the console's cursor
-            except Exception:
-                pass
+        # would make dupterm detach the screen. A kept Ctrl+C goes back as
+        # the byte, which dupterm turns into the KeyboardInterrupt.
         try:
+            if _INTERRUPTED[0]:
+                _INTERRUPTED[0] = False
+                buf[0] = 3
+                return 1
+            con = _CONSOLE[0]
+            if con is not None and con.beam is None:
+                _show_cursor()  # input() reads: the console's cursor
             return self._term.readinto(buf)
+        except KeyboardInterrupt:
+            buf[0] = 3
+            return 1
         except Exception:
             return None
+
+    def ioctl(self, req, arg):
+        # No poll support: without this method each select on stdin raised
+        # (and allocated) inside dupterm, which then ignored it.
+        return 0
 
 
 def _set_margins(term, keep_cursor=False):
@@ -365,7 +383,8 @@ def clip(text, limit):
 
 
 def wrap_text(text, width=DISPLAY_WIDTH):
-    source = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    # … and € draw as three characters (CP437 lacks them): counted as such
+    source = str(text).replace("\r\n", "\n").replace("\r", "\n").replace("…", "...").replace("€", "EUR")
     wrapped = []
     for paragraph in source.split("\n"):
         # leading spaces (code, an indented list) stay on the first line
@@ -562,6 +581,9 @@ def _poll_byte():
     # One pending key byte, or None. Raises HostTakeover when USB serial has
     # input while the PicoCalc keyboard is the key source: reading it as keys
     # would eat the bytes mpremote/Thonny send to reach the REPL.
+    if _INTERRUPTED[0]:  # a Ctrl+C the screen writer kept
+        _INTERRUPTED[0] = False
+        raise KeyboardInterrupt
     term = _terminal()
     poll = _stdin_poll()
     if term is not None:
