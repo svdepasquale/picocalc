@@ -9,9 +9,13 @@ from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-04.4"
+MODULE_VERSION = "2026-10-07.1"
 KEY_LOG = "keylog.txt"
+KEY_LOG_BATCH = 20  # keys per write to keylog.txt: one flash write per batch, not per key
 _IMPORT_TICKS = ticks_ms()
+# Backgrounds where black text reads better (the driver's vt100 colours:
+# white text is under 3.5:1 contrast on them)
+_LIGHT = (7, 10, 11, 13, 14, 15)
 
 
 def ram():
@@ -189,18 +193,24 @@ def info(header=True):
     return True
 
 
+def _log_keys(lines):
+    # Append the collected lines to keylog.txt in one write, then forget them.
+    if lines:
+        try:
+            with open(KEY_LOG, "a") as out:
+                out.write("\n".join(lines) + "\n")
+        except OSError:
+            pass
+        del lines[:]
+
+
 def keys(log=True):
     """Key test: shows each key's raw bytes and the name read_key() gives it;
-    also appends them to keylog.txt. q quits."""
+    also appends them to keylog.txt (KEY_LOG_BATCH keys a write). q quits."""
     screen_header("Key test")
     print("Press keys (arrows too). q quits.")
     print(_paint("raw bytes        name", GREY))
-    out = None
-    if log:
-        try:
-            out = open(KEY_LOG, "a")
-        except OSError:
-            out = None
+    lines = []
     try:
         while True:
             raw = [_pu._key_byte()]
@@ -220,14 +230,14 @@ def keys(log=True):
                 name = "ctrl-c"
             line = "{:<16} {}".format(" ".join("%02x" % b for b in raw), repr(name))
             print(line)
-            if out:
-                out.write(line + "\n")
-                out.flush()
+            if log:
+                lines.append(line)
+                if len(lines) >= KEY_LOG_BATCH:
+                    _log_keys(lines)
             if name in ("q", "Q"):
                 break
     finally:
-        if out:
-            out.close()
+        _log_keys(lines)
     return True
 
 
@@ -235,7 +245,7 @@ def colors():
     """The terminal's 16 colours, numbered (check the palette)."""
     screen_header("Colours")
     for n in range(16):
-        print("{:>2} {} {}".format(n, _paint("\u2588" * 10, n), _paint(" sample ", BLACK if n in (7, 15) else BWHITE, n)))
+        print("{:>2} {} {}".format(n, _paint("\u2588" * 10, n), _paint(" sample ", BLACK if n in _LIGHT else BWHITE, n)))
     return True
 
 

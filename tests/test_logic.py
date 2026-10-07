@@ -1812,6 +1812,100 @@ def test_clock_zone_saves():
         _unswap(clock_ntp, saved)
 
 
+# system
+
+
+class _KeyPresses:
+    # _key_byte() for the key test: a press's bytes come together, then a
+    # pause (a read with a timeout gets None)
+    def __init__(self, presses):
+        self.presses = list(presses)
+        self.tail = []
+
+    def __call__(self, timeout_ms=None):
+        if timeout_ms is not None:
+            return self.tail.pop(0) if self.tail else None
+        press = self.presses.pop(0)
+        self.tail = list(press[1:])
+        return press[0]
+
+
+class _LogFile:
+    writes = []
+
+    def __init__(self, path, mode):
+        self.path = path
+        self.mode = mode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def write(self, text):
+        _LogFile.writes.append((self.path, self.mode, text))
+        return len(text)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_status_key_log_batches():
+    import sys_status
+
+    out = []
+    saved = _swap(
+        sys_status,
+        {
+            "open": _LogFile,
+            "print": lambda *args, **kw: out.append(" ".join(str(a) for a in args)),
+            "screen_header": lambda title: None,
+        },
+    )
+    del _LogFile.writes[:]
+    try:
+        pu._key_byte = _KeyPresses([b"a", b"\x1b[A", b"q"])
+        sys_status.keys()
+        log = "61               'a'\n1b 5b 41         'up'\n71               'q'\n"
+        check("one write at the end", _LogFile.writes, [("keylog.txt", "a", log)])
+        del _LogFile.writes[:]
+        pu._key_byte = _KeyPresses([b"x"] * 44 + [b"q"])
+        sys_status.keys()
+        check("a write per 20 keys", [w[2].count("\n") for w in _LogFile.writes], [20, 20, 5])
+        del _LogFile.writes[:]
+        pu._key_byte = _KeyPresses([b"q"])
+        sys_status.keys(log=False)
+        check("no log, no write", _LogFile.writes, [])
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        _unswap(sys_status, saved)
+
+
+def test_status_colour_samples():
+    import sys_status
+
+    out = []
+    saved = _swap(
+        sys_status,
+        {
+            "print": lambda *args, **kw: out.append(" ".join(str(a) for a in args)),
+            "screen_header": lambda title: None,
+        },
+    )
+    try:
+        sys_status.colors()
+    finally:
+        _unswap(sys_status, saved)
+    black = [n for n in range(16) if pu.paint(" sample ", pu.BLACK, n) in out[n]]
+    white = [n for n in range(16) if pu.paint(" sample ", pu.BWHITE, n) in out[n]]
+    check("black text on the light colours", black, [7, 10, 11, 13, 14, 15])
+    check("white on the rest", white, [0, 1, 2, 3, 4, 5, 6, 8, 9, 12])
+
+
 def test_status_text_battery():
     saved = (pu.battery, pu.wifi_connected, pu.clock_synced, pu.utc_offset_hours)
     try:
