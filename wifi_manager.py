@@ -16,7 +16,6 @@ CREDENTIALS_FILE = "wifi_credentials.json"
 CONNECT_TIMEOUT_SECONDS = 8
 CONNECT_POLL_INTERVAL_MS = 300
 DISPLAY_LINE_CHARS = 32
-SSID_PREVIEW_CHARS = 12
 MENU_NETWORK_LIMIT = 6
 WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
@@ -24,6 +23,19 @@ SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
 WIFI_MANAGER_VERSION = "2026-10-07.1"
 _NETWORK_MODULE = None
+
+# wlan.status() in words, for the WiFi screen and failed connects: the rp2
+# port's STAT_* values (cyw43 link states), plus 2, joined but no IP yet,
+# which has no STAT_ name. The failures are the negative ones.
+_STATUS_TEXT = {
+    3: "connected",
+    2: "no IP yet",
+    1: "connecting",
+    0: "not connected",
+    -1: "connect failed",
+    -2: "network not found",
+    -3: "wrong password",
+}
 
 
 def _network_module():
@@ -46,8 +58,15 @@ def _clip(text, limit=DISPLAY_LINE_CHARS):
     return _clip_util(text, limit)
 
 
-def _clip_ssid(ssid):
-    return _clip(ssid, SSID_PREVIEW_CHARS)
+def _status_text(status):
+    return _STATUS_TEXT.get(status, "status {}".format(status))
+
+
+def _print_failure(status):
+    # A connect that ended without an IP: the link's reason, or the timeout
+    # while it was still on its way.
+    text = _status_text(status)
+    print("Fail:", text if status < 0 else "timed out, " + text)
 
 
 def _decode_ssid(raw_ssid):
@@ -137,7 +156,9 @@ def scan_networks(wlan):
 
 
 def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
-    """True once connected, False if not, None when q/Esc cancelled it."""
+    """The link status it ends on: network.STAT_GOT_IP once connected, a
+    failure or the status at the timeout otherwise (compare it, never test
+    its truth: failures are negative). None when q/Esc cancelled."""
     network = _network_module()
 
     if wlan.isconnected():
@@ -153,10 +174,10 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
         status = wlan.status()
 
         if status == network.STAT_GOT_IP:
-            return True
+            return status
 
         if status in (network.STAT_WRONG_PASSWORD, network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL):
-            return False
+            return status
 
         if _poll_key() in ("q", "Q", "esc"):
             wlan.disconnect()
@@ -165,7 +186,7 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
 
         _sleep_ms(CONNECT_POLL_INTERVAL_MS)
 
-    return wlan.isconnected()
+    return wlan.status()
 
 
 def get_connection_status():
@@ -196,10 +217,9 @@ def get_connection_status():
 
 def print_connection_status():
     info = get_connection_status()
-    print("WiFi:", info["connected"])
-    print("St:", info["status"])
+    print("WiFi:", _status_text(info["status"]))
     if info["ssid"]:
-        print("SSID:", _clip_ssid(info["ssid"]))
+        print("SSID:", info["ssid"])
     if info["ifconfig"]:
         print("IP:", info["ifconfig"][0])
 
@@ -215,7 +235,7 @@ def choose_network(networks):
     visible_networks = networks[:MENU_NETWORK_LIMIT]
     lines = []
     for index, (ssid, rssi) in enumerate(visible_networks, start=1):
-        lines.append("{}: {} {}dBm".format(index, _clip_ssid(ssid), rssi))
+        lines.append("{}: {} {}dBm".format(index, ssid, rssi))
     _paged_lines(lines, page_lines=MENU_NETWORK_LIMIT)
 
     if len(networks) > MENU_NETWORK_LIMIT:
@@ -269,17 +289,18 @@ def connect_saved_networks(wlan, credentials):
     if len(candidates) > MAX_CONNECT_CANDIDATES:
         print("Top {} candidates".format(MAX_CONNECT_CANDIDATES))
 
+    got_ip = _network_module().STAT_GOT_IP
     for ssid in limited_candidates:
-        print("Try:", _clip_ssid(ssid))
-        joined = connect_to_wifi(wlan, ssid, credentials[ssid])
-        if joined is None:
+        print("Try:", ssid)
+        status = connect_to_wifi(wlan, ssid, credentials[ssid])
+        if status is None:
             return None
-        if joined:
-            print("OK:", _clip_ssid(ssid))
+        if status == got_ip:
+            print("OK:", ssid)
             print("IP:", wlan.ifconfig()[0])
             _sync_clock()
             return True
-        print("Fail:", _clip_ssid(ssid))
+        _print_failure(status)
 
     return False
 
@@ -313,19 +334,20 @@ def auto_connect_or_prompt(interactive=True):
         print("No selection.")
         return False
 
+    print("Network:", selected_ssid)  # whole: a 32-byte name fits the line
     try:
-        password = _read_line("Pass '{}': ".format(_clip_ssid(selected_ssid)), mask="*")
+        password = _read_line("Password then Enter: ", mask="*")
     except KeyboardInterrupt:
         password = None
     if not password:
         print("No password.")
         return False
 
-    print("Connecting:", _clip_ssid(selected_ssid))
-    joined = connect_to_wifi(wlan, selected_ssid, password)
-    if joined is None:
+    print("Connecting...")
+    status = connect_to_wifi(wlan, selected_ssid, password)
+    if status is None:
         return None
-    if joined:
+    if status == _network_module().STAT_GOT_IP:
         credentials[selected_ssid] = password
         # save_credentials() prints what failed; the link is up either way
         print("OK. Saved." if save_credentials(credentials) else "Connected, not saved.")
@@ -333,7 +355,7 @@ def auto_connect_or_prompt(interactive=True):
         _sync_clock()
         return True
 
-    print("Connect failed.")
+    _print_failure(status)
     return False
 
 
@@ -355,7 +377,7 @@ def saved():
         print("No saved networks.")
         return []
     for index, name in enumerate(names, start=1):
-        print("{}: {}".format(index, _clip(name, DISPLAY_LINE_CHARS - 4)))
+        print("{}: {}".format(index, name))
     return names
 
 
@@ -376,7 +398,7 @@ def forget(name_or_index):
     del credentials[name]
     if not save_credentials(credentials):
         return False
-    print("Forgot:", _clip_ssid(name))
+    print("Forgot:", name)
     return True
 
 

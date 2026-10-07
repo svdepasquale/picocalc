@@ -1364,6 +1364,46 @@ def test_wifi_failed_save_reported():
     check("says not saved", "Connected, not saved." in got["out"], True)
 
 
+def _fails(got):
+    return [line for line in got["out"] if line.startswith("Fail")]
+
+
+def test_wifi_says_why():
+    # the link status in words, on the WiFi screen and for each failure;
+    # names whole (32 bytes fit the 52 columns)
+    name = "x" * 32
+    wlan = FakeWlan([_scan_item(b"home", -50), _scan_item(name.encode(), -60)], reach={"home": -3, name: -2})
+
+    def run():
+        wifi_manager.save_credentials({"home": "p1", name: "p2"})
+        check("none joined", wifi_manager.auto_connect_or_prompt(interactive=False), False)
+        wifi_manager.print_connection_status()
+
+    got = _with_wifi(wlan, run)
+    check("reasons", _fails(got), ["Fail: wrong password", "Fail: network not found"])
+    check("name whole", "Try: " + name in got["out"], True)
+    check("status screen", "WiFi: network not found" in got["out"], True)
+
+    slow = FakeWlan([_scan_item(b"home", -50)])  # never gets past joining
+    got = _with_wifi(slow, lambda: wifi_manager.connect_saved_networks(slow, {"home": "p1"}))
+    check("timeout", _fails(got), ["Fail: timed out, connecting"])
+
+    def ask():
+        check("chosen, refused", wifi_manager.auto_connect_or_prompt(), False)
+
+    got = _with_wifi(FakeWlan([_scan_item(b"home", -50)], reach={"home": -3}), ask, keys=["1"], line="bad")
+    check("prompt says Enter", got["prompts"], ["Password then Enter: "])
+    check("chooser failure", _fails(got), ["Fail: wrong password"])
+
+    def up():
+        check("status on success", wifi_manager.connect_to_wifi(joined, "home", "p1"), 3)
+        wifi_manager.print_connection_status()
+
+    joined = FakeWlan(reach={"home": 3})
+    got = _with_wifi(joined, up)
+    check("connected screen", got["out"], ["WiFi: connected", "SSID: home", "IP: 10.0.0.7"])
+
+
 class FakePoll:
     def __init__(self, ready):
         self.ready = ready
