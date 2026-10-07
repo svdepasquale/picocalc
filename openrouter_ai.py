@@ -31,7 +31,7 @@ MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
 # per read: a non-streamed reply sends nothing until generation ends
 AI_TIMEOUT = 60
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-07.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -513,13 +513,15 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
     response = None
     text = None
     try:
+        # bytes: requests sends len(data) as Content-Length, and MicroPython's
+        # json writes accents as raw UTF-8 (a str counts them as one each)
         response = _http_request(
             requests,
             "POST",
             endpoint,
             timeout=AI_TIMEOUT,
             headers=headers,
-            data=json.dumps(payload),
+            data=json.dumps(payload).encode(),
         )
         status = response.status_code
         if status != 200:

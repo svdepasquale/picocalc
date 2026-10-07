@@ -851,6 +851,44 @@ def test_stream_printer_wraps():
     check("wrapped lines", "".join(out), "one two\nthree four\nfive\n")
 
 
+_SSE_OK = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
+
+
+def _with_ai(config, body):
+    # ask() against a scripted server; returns what openrouter_ai printed
+    saved = (ai.CONFIG_FILE, ai.check_wifi, ai._http_module)
+    out = []
+    ai.CONFIG_FILE = _TMP
+    ai.check_wifi = lambda: True
+    ai.print = lambda *a, **k: out.append(" ".join(str(x) for x in a))
+    try:
+        pu.save_json(_TMP, config)
+        body()
+    finally:
+        ai.CONFIG_FILE, ai.check_wifi, ai._http_module = saved
+        del ai.print
+        ai._HISTORY[:] = []
+        ai._LAST_RESPONSES[:] = []
+        _rm(_TMP)
+    return out
+
+
+def test_ai_body_is_utf8_bytes():
+    # requests sends len(data) as Content-Length: a str counts characters,
+    # and MicroPython's json writes accents as raw UTF-8
+    prompt = "perché — caffè"
+    req = ScriptedRequests([HttpResponse(200, _SSE_OK)])
+
+    def run():
+        ai._http_module = lambda: req
+        check("reply", ai.ask(prompt), "ok")
+
+    _with_ai({"api_key": "k"}, run)
+    data = req.calls[0][2]["data"]
+    check("body is bytes", isinstance(data, bytes), True)
+    check("prompt round-trips", ai.json.loads(data.decode())["messages"][-1]["content"], prompt)
+
+
 # ── synthesizer / calc ──────────────────────────
 
 import synthesizer as synth
