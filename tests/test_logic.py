@@ -719,6 +719,37 @@ def test_miniflux_large_and_401():
     _with_miniflux(run)
 
 
+def test_miniflux_content_cut():
+    # a post opening with a long tag: the cut fell inside it, and the
+    # unterminated tag read as the summary
+    content = '<figure><img srcset="' + "x" * 8000 + '"></figure><p>Testo</p>'
+    items = rss_news._mf_items({"entries": [{"title": "T", "content": content}]})
+    check("no tag text as summary", items[0]["summary"], "")
+    long_text = "<p>" + "parola " * 900 + "</p>"  # cut inside the text: kept
+    items = rss_news._mf_items({"entries": [{"title": "T", "content": long_text}, {"title": "U", "content": None}]})
+    check("summary from the head", items[0]["summary"][:13], "parola parola")
+    check("no content", items[1]["summary"], "")
+
+    def run():
+        # cleaning the entries runs out of memory: no MemoryError out of mf()
+        real_clean = rss_news._clean_text
+
+        def no_memory(text, limit=0, html=True):
+            raise MemoryError("memory allocation failed")
+
+        rss_news._clean_text = no_memory
+        rss_news._LAST_ITEMS = [{"title": "old RSS item"}]
+        req = ScriptedRequests([HttpResponse(200, _MF_BODY)])
+        rss_news._http_module = lambda: req
+        try:
+            check("out of memory while cleaning", rss_news.mf(), 0)
+            check("no stale items", rss_news._LAST_ITEMS, [])
+        finally:
+            rss_news._clean_text = real_clean
+
+    _with_miniflux(run)
+
+
 # ── wifi_manager: saved / forget ────────────────
 
 import wifi_manager

@@ -23,6 +23,7 @@ MF_CONFIG_FILE = "miniflux_config.json"
 MF_LIMIT = 3
 MF_MAX_BYTES = 49152
 MF_MIN_BYTES = 16384  # retry size when no 48 KB block is free
+MF_CONTENT_CHARS = 6000  # of an entry's HTML, cleaned for its summary
 MAX_XML_BYTES = 26000
 MAX_TITLE_CHARS = 140
 MAX_SUMMARY_CHARS = 480
@@ -759,11 +760,19 @@ def _mf_items(data):
             continue
         feed = entry.get("feed")
         source = feed.get("title", "") if isinstance(feed, dict) else ""
-        content = str(entry.get("content") or "")
+        content = entry.get("content")  # up to ~45 KB: str() would copy it
+        if isinstance(content, str):
+            content = content[:MF_CONTENT_CHARS]
+            lt = content.rfind("<")
+            if lt > content.rfind(">"):
+                # a tag cut in two: '<img srcset="...' is not text
+                content = content[:lt]
+        else:
+            content = ""
         items.append(
             {
                 "title": _clean_text(entry.get("title", ""), MAX_TITLE_CHARS, html=False),
-                "summary": _clean_text(content[:6000], MAX_SUMMARY_CHARS),
+                "summary": _clean_text(content, MAX_SUMMARY_CHARS),
                 "link": str(entry.get("url", "")),
                 "date": str(entry.get("published_at", ""))[:16].replace("T", " "),
                 "source": _clean_text(source or "Miniflux", 28),
@@ -856,7 +865,11 @@ def mf(limit=MF_LIMIT):
         print("Entry too large.")
         return 0
 
-    items = _mf_items(data)
+    try:
+        items = _mf_items(data)
+    except MemoryError:
+        print("Out of memory.")
+        return 0
     total = data.get("total", 0) if isinstance(data, dict) else 0
     del data
     gc.collect()
