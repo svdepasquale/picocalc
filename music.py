@@ -31,6 +31,7 @@ SD_DEFAULT_BAUDRATE = 1320000  # the firmware's sdcard driver default, restored 
 MAX_BYTES_PER_S = 140000  # what the SD keeps up with next to the screen
 VOLUME_MAX = 16
 STALL_MS = 2000  # no finished buffer for this long while playing: stop
+KEY_MS = 50  # keyboard poll period while playing: each poll is an I2C read
 _QUIT = ("q", "Q", "esc", "eof")
 
 # RP2350 PWM registers (pico-sdk hardware/regs/pwm.h, dreq.h)
@@ -225,12 +226,16 @@ def _sd_card():
 
 
 def _ramp(start, end):
-    # Slide the output level so the speakers don't click.
+    # Slide the compare word from `start` to `end` (left duty low, right
+    # high), each side from its own level, so the speakers don't click.
     from machine import mem32
 
+    l0, r0 = start & 0xFFFF, (start >> 16) & 0xFFFF
+    l1, r1 = end & 0xFFFF, (end >> 16) & 0xFFFF
     for k in range(33):
-        v = start + (end - start) * k // 32
-        mem32[_reg(_AUDIO, _CC)] = (v << 16) | v
+        left = l0 + (l1 - l0) * k // 32
+        right = r0 + (r1 - r0) * k // 32
+        mem32[_reg(_AUDIO, _CC)] = (right << 16) | left
         _sleep_ms(1)
 
 
@@ -243,7 +248,7 @@ def _audio_on():
     mem32[_reg(_AUDIO, _TOP_REG)] = _TOP
     mem32[_reg(_AUDIO, _CC)] = 0
     mem32[_reg(_AUDIO, _CSR)] = 1
-    _ramp(0, _MID)
+    _ramp(0, (_MID << 16) | _MID)
     return pins
 
 
@@ -317,10 +322,7 @@ def play_file(path, name=None):
     frame_bytes = channels * bits // 8
     total = size // frame_bytes
     total_s = total / rate
-    gc.collect()
-    raw = bytearray(FRAMES * frame_bytes)
-    bufs = (array("I", bytearray(4 * FRAMES)), array("I", bytearray(4 * FRAMES)))
-    mv = memoryview(raw)
+    raw = bufs = mv = None  # allocated in the try: a MemoryError closes the file
     sd = _sd_card()
     ch = []
     free = []
@@ -359,6 +361,10 @@ def play_file(path, name=None):
             free.append(k)
 
     try:
+        gc.collect()
+        raw = bytearray(FRAMES * frame_bytes)
+        bufs = (array("I", bytearray(4 * FRAMES)), array("I", bytearray(4 * FRAMES)))
+        mv = memoryview(raw)
         if sd is not None:
             sd.init_spi(SD_BAUDRATE)
         f.seek(offset)
@@ -387,7 +393,7 @@ def play_file(path, name=None):
         _pacer(True)
         paused = False
         shown = None
-        progress = _ticks_ms()
+        progress = polled = _ticks_ms()
         while True:
             if free:
                 progress = _ticks_ms()
@@ -405,7 +411,11 @@ def play_file(path, name=None):
                         if left <= 0:
                             stats[2] = k
                             ch[k].ctrl = ctrl(k, False)
-            key = _poll_key()
+            now = _ticks_ms()
+            key = None
+            if _ticks_diff(now, polled) >= KEY_MS:
+                polled = now
+                key = _poll_key()
             if key in _QUIT:
                 result = "quit"
                 break
@@ -419,14 +429,13 @@ def play_file(path, name=None):
                 paused = not paused
                 _pacer(not paused)
                 shown = None
-                progress = _ticks_ms()
+                progress = now
             elif key in ("+", "=", "up") and _volume < VOLUME_MAX:
                 _volume += 1
                 shown = None
             elif key in ("-", "_", "down") and _volume > 0:
                 _volume -= 1
                 shown = None
-            now = _ticks_ms()
             if not paused and _ticks_diff(now, progress) > STALL_MS:
                 raise OSError("audio stalled")  # no buffer finished: never loop on stale samples
             if shown is None or _ticks_diff(now, shown) >= 500:
@@ -444,7 +453,7 @@ def play_file(path, name=None):
             # channel, which can spin forever on the RP2350 (erratum E5)
             dma.close()
         if pins is not None:
-            _ramp(mem32[_reg(_AUDIO, _CC)] & 0xFFFF, 0)
+            _ramp(mem32[_reg(_AUDIO, _CC)], 0)
         if sd is not None:
             sd.init_spi(SD_DEFAULT_BAUDRATE)
         f.close()
@@ -480,7 +489,7 @@ def player(start=0):
         while 0 <= pos < len(tracks):
             try:
                 result = play_file(tracks[pos][1], tracks[pos][0])
-            except (OSError, ValueError) as error:
+            except (OSError, ValueError, MemoryError) as error:
                 print("\x1b[13;1H" + _paint("Can't play: {}".format(error), BRED))
                 _wait_key()
                 result = "quit"

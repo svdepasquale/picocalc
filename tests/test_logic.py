@@ -1384,6 +1384,25 @@ def test_music_songs():
 # carries i in its low half, so the words that reach the speaker show every
 # replay and skip.
 
+
+def _swap(module, attrs):
+    # Stub module attributes; returns what _unswap() puts back (None: a
+    # builtin such as open or print, whose stub is deleted again)
+    old = {}
+    for name in attrs:
+        old[name] = getattr(module, name, None)
+        setattr(module, name, attrs[name])
+    return old
+
+
+def _unswap(module, old):
+    for name in old:
+        if old[name] is None:
+            delattr(module, name)
+        else:
+            setattr(module, name, old[name])
+
+
 _SIM = [None]
 
 
@@ -1465,7 +1484,10 @@ class _SimMem:
         return _SIM[0].mem.get(addr, 0)
 
     def __setitem__(self, addr, value):
-        _SIM[0].mem[addr] = value
+        sim = _SIM[0]
+        sim.mem[addr] = value
+        if addr == sim.cc:
+            sim.ramp.append(value)  # Python's writes of the level (the DMA's aren't kept)
 
 
 class _SimMachine:
@@ -1524,6 +1546,7 @@ class _PlaySim:
         self.dmas = []
         self.pending = []
         self.errors = []
+        self.ramp = []
         self.last = self.heard = -1
         self.words = self.jumps = self.stale = self.polls = 0
         self.csr = music._reg(music._PACER, music._CSR)
@@ -1567,8 +1590,9 @@ def _sim_convert(data, out, frames, channels, bits, volume):
         out[i] = data[at] | data[at + 1] << 8 | data[at + 2] << 16 | data[at + 3] << 24
 
 
-def _play_sim(frames, rate, kbs, keys=()):
-    # (play_file's result, the model) for a 16-bit stereo file of `frames`
+def _play_sim(frames, rate, kbs, keys=(), extra=None):
+    # (play_file's result or exception, the model) for a 16-bit stereo file
+    # of `frames`; `extra`: more module attributes to stub
     import music
 
     sim = _PlaySim(rate, kbs, keys)
@@ -1591,28 +1615,24 @@ def _play_sim(frames, rate, kbs, keys=()):
         "_sd_card": lambda: None,
         "_screen_header": lambda *args: None,
     }
-    saved = {}
-    for name in stubs:
-        saved[name] = getattr(music, name, None)
-        setattr(music, name, stubs[name])
+    stubs.update(extra or {})
+    saved = _swap(music, stubs)
     modules = {"rp2": sys.modules.get("rp2"), "machine": sys.modules.get("machine")}
     sys.modules["rp2"] = _SimRp2
     sys.modules["machine"] = _SimMachine
+    sim.file = wav
     try:
         result = music.play_file("x.wav", "x")
+    except Exception as error:
+        result = error
     finally:
-        for name in stubs:
-            if saved[name] is None:
-                delattr(music, name)  # a builtin (open, print) again
-            else:
-                setattr(music, name, saved[name])
+        _unswap(music, saved)
         for name in modules:
             if modules[name] is None:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = modules[name]
         _SIM[0] = None
-    sim.file = wav
     return result, sim
 
 
@@ -1634,6 +1654,50 @@ def test_music_play_gaps():
     check("slow SD: every replay is a gap", stats["gaps"], sim.stale)
     check("slow SD: played time from frames read, not replays", stats["frames"], total)
     check("slow SD: no channel aborted", sim.errors, [])
+
+
+def test_music_keys_ramp_memory():
+    import music
+
+    result, sim = _play_sim(10 * 256 + 37, 4000, 200, keys=[(300, "q")])
+    check("q stops", result, "quit")
+    check("q: file closed, no channel aborted", (sim.file.closed, sim.errors), (True, []))
+    check("keys polled every 50 ms at most", sim.polls <= sim.t // 50000 + 1, True)
+    check("ramp up: both sides to the middle", (sim.ramp[1], sim.ramp[33]), (0, 512 << 16 | 512))
+    down = sim.ramp[-33:]
+    check("ramp down from both sides' levels", (down[0], down[-1]), (0x0123 << 16 | sim.last, 0))
+    rights = [word >> 16 for word in down]
+    steps = [a - b for a, b in zip(rights, rights[1:])]
+    check("right side slides down", (min(steps) >= 0, max(steps) <= 10), (True, True))
+
+    def no_memory(n):
+        raise MemoryError("memory allocation failed")
+
+    result, sim = _play_sim(1000, 4000, 200, extra={"bytearray": no_memory})
+    check("no memory: raised, file closed", (isinstance(result, MemoryError), sim.file.closed), (True, True))
+    out = []
+    waits = []
+    picks = [("enter", 0), ("q", 0)]
+
+    def play_file(path, name):
+        raise MemoryError("memory allocation failed")
+
+    saved = _swap(
+        music,
+        {
+            "songs": lambda: [("a", "/sd/music/a.wav", 10)],
+            "_pick": lambda title, labels, hints=None, pos=0: picks.pop(0),
+            "play_file": play_file,
+            "_wait_key": lambda *args: waits.append(1),
+            "_clear_screen": lambda: None,
+            "print": lambda *args, **kw: out.append(" ".join(str(a) for a in args)),
+        },
+    )
+    try:
+        check("player stays up on MemoryError", music.player(), None)
+        check("told, then back to the list", ("Can't play: memory" in out[0], waits, picks), (True, [1], []))
+    finally:
+        _unswap(music, saved)
 
 
 def test_status_text_battery():
