@@ -672,6 +672,37 @@ def test_calc_huge_ints():
         sc._HISTORY[:] = saved[1]
 
 
+def test_calc_degrees():
+    # Degrees: zeros at multiples of 90 come out as zeros (float32's pi made
+    # sin(180) -8.7e-08) and tan(90) is an error, not -22877332.
+    import math
+
+    saved = (sc.DEG_MODE, sc._LAST, list(sc._HISTORY))
+    try:
+        sc.DEG_MODE = True
+        ns = sc._calc_namespace()  # what the prompt evaluates with
+        check("sin(180)", ns["sin"](180), 0)
+        check("cos(90)", ns["cos"](90), 0)
+        check("sin(540)", ns["sin"](540), 0)
+        check("tan(180)", ns["tan"](180), 0)
+        check("sin(-90)", abs(ns["sin"](-90) + 1) < 1e-6, True)
+        check("reduced before converting", abs(ns["sin"](360 * 10 ** 20 + 30) - 0.5) < 1e-6, True)
+        check("tan(45)", abs(ns["tan"](45) - 1) < 1e-6, True)
+        undefined = []
+        for angle in (90, -90, 270, 450.0):
+            try:
+                ns["tan"](angle)
+            except ValueError:
+                undefined.append(angle)
+        check("tan at odd multiples of 90", undefined, [90, -90, 270, 450.0])
+        check("sin() at the REPL too", sc.sin(180), 0)
+        sc.DEG_MODE = False
+        check("radians untouched", ns["sin"](math.pi) != 0, True)
+    finally:
+        sc.DEG_MODE, sc._LAST = saved[:2]
+        sc._HISTORY[:] = saved[2]
+
+
 # ── notes ───────────────────────────────────────
 
 import notes

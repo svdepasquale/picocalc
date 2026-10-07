@@ -99,8 +99,30 @@ def _print_result(expr, result):
 
 def _to_rad(x):
     if DEG_MODE:
-        return x * math.pi / 180.0
+        return x % 360 * math.pi / 180.0  # reduced in degrees, where it's exact
     return x
+
+
+def _deg_zero(value):
+    # Degrees: float32's pi is not pi, so sin(180) came out -8.7e-08. That
+    # close to a zero (multiples of 90), the answer is the zero.
+    if DEG_MODE and -1e-6 < value < 1e-6:
+        return 0.0
+    return value
+
+
+def _sin(x):
+    return _deg_zero(math.sin(_to_rad(x)))
+
+
+def _cos(x):
+    return _deg_zero(math.cos(_to_rad(x)))
+
+
+def _tan(x):
+    if DEG_MODE and x % 180 == 90:
+        raise ValueError("math domain error")  # tan(90) showed -22877332
+    return _deg_zero(math.tan(_to_rad(x)))
 
 
 def _from_rad(x):
@@ -132,9 +154,9 @@ def _calc_factorial(n):
 
 def _calc_namespace():
     namespace = {
-        "sin": lambda x: math.sin(_to_rad(x)),
-        "cos": lambda x: math.cos(_to_rad(x)),
-        "tan": lambda x: math.tan(_to_rad(x)),
+        "sin": _sin,
+        "cos": _cos,
+        "tan": _tan,
         "asin": lambda x: _from_rad(math.asin(x)),
         "acos": lambda x: _from_rad(math.acos(x)),
         "atan": lambda x: _from_rad(math.atan(x)),
@@ -191,19 +213,19 @@ def mode():
 
 
 def sin(x):
-    result = math.sin(_to_rad(x))
+    result = _sin(x)
     _print_result("sin({})".format(x), result)
     return result
 
 
 def cos(x):
-    result = math.cos(_to_rad(x))
+    result = _cos(x)
     _print_result("cos({})".format(x), result)
     return result
 
 
 def tan(x):
-    result = math.tan(_to_rad(x))
+    result = _tan(x)
     _print_result("tan({})".format(x), result)
     return result
 
