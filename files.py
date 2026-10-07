@@ -16,7 +16,7 @@ from pico_utils import console_resume as _console_resume, console_suspend as _co
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-06.1"
+MODULE_VERSION = "2026-10-07.1"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000
@@ -102,10 +102,19 @@ def _utf8_end(data):
 def decode(data):
     """Bytes to text; a cut multi-byte character at the end is dropped,
     other invalid UTF-8 shows as '?'."""
+    end = _utf8_end(data)
     try:
-        return str(data[: _utf8_end(data)], "utf-8")
-    except Exception:
-        return "".join(chr(b) if b < 128 else "?" for b in data)
+        return str(data if end == len(data) else data[:end], "utf-8")
+    except UnicodeError:
+        pass
+    # Not UTF-8 (Latin-1...): bytes from 0x80 as "?", one pass, one decode.
+    # A join over the bytes built a list as long as the file: ~460 KB of
+    # heap for 32 KB of text.
+    buf = bytearray(data)
+    for i in range(len(buf)):
+        if buf[i] > 127:
+            buf[i] = 63
+    return str(buf, "utf-8")
 
 
 def text_lines(text, width=DISPLAY_WIDTH):
@@ -160,20 +169,26 @@ def view(path):
     """Show a text file (its first VIEW_MAX bytes)."""
     try:
         size = os.stat(path)[6]
-        gc.collect()
         with open(path, "rb") as f:
-            data = f.read(VIEW_MAX)
+            binary = is_binary(f.read(512))  # all it looks at
+            if not binary:
+                f.seek(0)
+                gc.collect()
+                lines = text_lines(decode(f.read(VIEW_MAX)))
     except OSError as error:
         print("Can't read {}: {}".format(path, error))
         _wait_key()
         return False
-    if is_binary(data):
+    except MemoryError:
+        gc.collect()
+        print("Out of memory: can't show {}.".format(_short(path)))
+        _wait_key()
+        return False
+    if binary:
         _screen_header(_short(path))
         print("Binary file, {}.".format(_format_bytes(size)))
         _wait_key()
         return False
-    lines = text_lines(decode(data))
-    data = None
     if size > VIEW_MAX:
         lines.append(_paint("[first {} of {}]".format(_format_bytes(VIEW_MAX), _format_bytes(size)), GREY))
     pager(_short(path), lines)

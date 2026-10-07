@@ -1267,12 +1267,76 @@ def test_files_text():
     check("cut character dropped", files.decode("caffè".encode()[:-1]), "caff")
     check("bad byte", files.decode(b"a\xffb\xfe"), "a?b?")
     check("whole multi-byte kept", files.decode("è".encode()), "è")
+    latin = b"caff\xe8 latte\n" * 200  # small: the suite also runs on the device
+    check("latin-1 as ?", files.decode(latin), "caff? latte\n" * 200)
     check(
         "hard wrap keeps indent",
         files.text_lines("    abcdef\n\n\tx\x1by\n", width=6),
         ["    ab", "cdef", "", "    x?", "y"],
     )
     check("crlf", files.text_lines("a\r\nb"), ["a", "b"])
+
+
+class ReadSpy:
+    # The file files.view() opens, its reads recorded.
+    def __init__(self, f, sizes):
+        self.f = f
+        self.sizes = sizes
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
+
+    def read(self, n=-1):
+        self.sizes.append(n)
+        return self.f.read(n)
+
+    def seek(self, pos):
+        return self.f.seek(pos)
+
+
+def test_files_view():
+    import files
+
+    folder = _HERE + "/_tmp_files"
+    _rmtree(folder)
+    os.mkdir(folder)
+    shown = []
+    reads = []
+    saved = (files.pager, files.decode)
+    try:
+        files.pager = lambda title, lines: shown.append(lines)
+        files.open = lambda path, mode="r": ReadSpy(open(path, mode), reads)
+        text = "".join("line {}\n".format(i) for i in range(200))  # past the 512-byte sample
+        _write(folder + "/t.txt", text)
+        check("text shown", files.view(folder + "/t.txt"), True)
+        check("all of it, from the start", shown, [files.text_lines(text)])
+        check("the sample, then the text", reads, [512, files.VIEW_MAX])
+        with open(folder + "/b.bin", "wb") as f:
+            f.write(b"\x00" * 600 + b"text")
+        del reads[:]
+        keys_from(b" ")
+        check("binary not shown", (files.view(folder + "/b.bin"), len(shown)), (False, 1))
+        check("binary: only the sample read", reads, [512])
+        with open(folder + "/l.txt", "wb") as f:
+            f.write(b"caff\xe8 latte\n" * 100)
+        files.view(folder + "/l.txt")
+        check("latin-1 shown", shown[-1][:2], ["caff? latte", "caff? latte"])
+
+        def no_memory(data):
+            raise MemoryError
+
+        files.decode = no_memory
+        keys_from(b" ")
+        check("out of memory stays in Files", (files.view(folder + "/t.txt"), len(shown)), (False, 2))
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        files.pager, files.decode = saved
+        if hasattr(files, "open"):
+            del files.open
+        _rmtree(folder)
 
 
 # snake
