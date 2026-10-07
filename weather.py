@@ -3,7 +3,7 @@ import time
 
 from pico_utils import clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
-from pico_utils import http_request as _http_request
+from pico_utils import http_request as _http_request, net_error as _net_error
 from pico_utils import paint as _paint, GREY, BWHITE, BBLUE, BCYAN, BGREEN, BYELLOW, BRED
 from pico_utils import BMAGENTA, WHITE
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
@@ -180,7 +180,7 @@ def set_city(name):
             return False
         data = response.json()
     except Exception as e:
-        print("Err:", _clip(e, 24))
+        print("Err:", _net_error(e))
         return False
     finally:
         if response is not None:
@@ -253,7 +253,7 @@ def now():
             return None
         data = response.json()
     except Exception as e:
-        print("Err:", _clip(e, 24))
+        print("Err:", _net_error(e))
         return None
     finally:
         if response is not None:
@@ -323,7 +323,7 @@ def forecast(days=3):
             return None
         data = response.json()
     except Exception as e:
-        print("Err:", _clip(e, 24))
+        print("Err:", _net_error(e))
         return None
     finally:
         if response is not None:

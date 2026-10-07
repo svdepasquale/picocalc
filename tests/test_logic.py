@@ -98,6 +98,26 @@ def test_http_request_user_agent():
     check("caller header kept", headers.get("X-Auth-Token"), "t")
 
 
+def test_net_error_words():
+    room = pu.DISPLAY_WIDTH - 6  # after "Err: " on one line
+    eof = "SSL - The connection indicated an EOF"
+    cases = [
+        ("dns", OSError(-2), "DNS failed"),
+        ("timeout", OSError(110), "timed out"),
+        ("reset", OSError(104), "connection reset"),
+        ("aborted", OSError(103), "connection reset"),
+        ("unreachable", OSError(113), "unreachable"),
+        ("tls buffers", OSError(12), "out of memory"),
+        ("heap", MemoryError(), "out of memory"),
+        ("mbedtls text", OSError(-29312, eof), eof[:room]),
+        ("text only", OSError("no route"), "no route"),
+        ("other clipped", ValueError("x" * 80), "x" * room),
+        ("never blank", OSError(), "OSError"),
+    ]
+    for name, error, want in cases:
+        check("net_error " + name, pu.net_error(error), want)
+
+
 # keys: feed raw bytes the way the PicoCalc driver emits them
 
 
@@ -919,6 +939,42 @@ def test_ai_key_only_to_openrouter():
     _with_ai({"api_key": "sk-or"}, run)
 
 
+class FailingRequests:
+    def __init__(self, error):
+        self.error = error
+        self.calls = 0
+
+    def request(self, method, url, **kw):
+        self.calls += 1
+        raise self.error
+
+
+class CutRaw:
+    # hands out `data`, then the connection drops
+    def __init__(self, data, error):
+        self.data, self.error = data, error
+
+    def readinto(self, buf):
+        if not self.data:
+            raise self.error
+        n = len(self.data)
+        buf[:n] = self.data
+        self.data = b""
+        return n
+
+
+def test_ai_network_errors_in_words():
+    def run():
+        ai._http_module = lambda: FailingRequests(OSError(110))
+        check("no reply", ai.ask("hi"), None)
+        text = ai._sse_text(CutRaw(b'data: {"choices":[{"delta":{"content":"Hal"}}]}\n', OSError(104)), lambda t: None)
+        check("text before the cut", text, "Hal")
+
+    out = _with_ai({"api_key": "k"}, run)
+    check("request error", "Err: timed out" in out, True)
+    check("stream cut", "Cut: connection reset" in out, True)
+
+
 # ── weather ─────────────────────────────────────
 
 import weather
@@ -939,6 +995,34 @@ def test_weather_failed_save():
         weather.CONFIG_FILE = saved
         del weather.print
         _rm(_TMP)
+
+
+_WEATHER_STUBS = ("CONFIG_FILE", "check_wifi", "_http_module", "_ticks_ms")
+
+
+def _with_weather(body, online=True):
+    # body() against a scripted server; returns what weather printed
+    saved = [getattr(weather, name) for name in _WEATHER_STUBS]
+    out = []
+    weather.CONFIG_FILE = _TMP
+    weather.check_wifi = lambda: online
+    weather.print = lambda *a, **k: out.append(" ".join(str(x) for x in a))
+    try:
+        body()
+    finally:
+        for name, value in zip(_WEATHER_STUBS, saved):
+            setattr(weather, name, value)
+        del weather.print
+        _rm(_TMP)
+    return out
+
+
+def test_weather_network_error_in_words():
+    def run():
+        weather._http_module = lambda: FailingRequests(OSError(-2))
+        check("no weather", weather.now(), None)
+
+    check("said in words", "Err: DNS failed" in _with_weather(run), True)
 
 
 # ── synthesizer / calc ──────────────────────────
@@ -1440,6 +1524,18 @@ def test_wifi_one_scan_no_idle_wait():
     check("one warm-up wait", got["sleeps"], [wifi_manager.WLAN_WARMUP_MS])
     check("one scan for both", down.scans, 1)
     check("chooser from it", got["shown"], ["1: cafe -50dBm"])
+
+
+class BusyWlan(FakeWlan):
+    def scan(self):
+        self.scans += 1
+        raise OSError(110)
+
+
+def test_wifi_scan_error_in_words():
+    wlan = BusyWlan()
+    got = _with_wifi(wlan, lambda: check("nothing found", wifi_manager._scan_retry(wlan), []))
+    check("said in words, retried", got["out"], ["Scan: timed out", "Scan retry", "Scan: timed out"])
 
 
 class FakePoll:

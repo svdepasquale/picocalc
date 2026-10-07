@@ -7,7 +7,7 @@ from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
-from pico_utils import http_request as _http_request
+from pico_utils import http_request as _http_request, net_error as _net_error
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
 from pico_utils import DISPLAY_WIDTH
@@ -461,7 +461,7 @@ def _sse_text(raw, emit):
                     break
     except (OSError, ValueError) as error:
         emit("\n")
-        print("(stream cut:", _clip(error, 24), ")")
+        print("Cut:", _net_error(error))
     return "".join(parts)
 
 
@@ -565,7 +565,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
                 text = _clip(text, MAX_OUTPUT_CHARS)
                 _paged_print(text)
     except Exception as error:
-        print("Request fail:", error)
+        print("Err:", _net_error(error))
         return None
     finally:
         if response is not None:

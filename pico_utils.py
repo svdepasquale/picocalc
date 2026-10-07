@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-06.3"
+MODULE_VERSION = "2026-10-07.1"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -933,6 +933,35 @@ def http_request(requests, method, url, timeout=HTTP_TIMEOUT, **kwargs):
         if "keyword" not in str(error):
             raise
         return requests.request(method, url, **kwargs)
+
+
+# OSError args[0] from the device's network stack: lwIP errnos with Linux
+# numbers (a host's errno module has others), getaddrinfo's -2, and ENOMEM
+# when mbedtls can't get its ~20 KB of TLS buffers.
+_NET_ERRORS = {
+    -2: "DNS failed",
+    12: "out of memory",
+    103: "connection reset",
+    104: "connection reset",
+    110: "timed out",
+    113: "unreachable",
+}
+
+
+def net_error(error):
+    """A failed request in a few words, to print after a label of up to 5
+    characters ("Err:"): a known errno as text, else the message (mbedtls
+    errors carry one), clipped to fit."""
+    if isinstance(error, MemoryError):
+        return "out of memory"  # str() of it is empty
+    text = error
+    args = getattr(error, "args", ())
+    if isinstance(error, OSError) and args:
+        if isinstance(args[0], int) and args[0] in _NET_ERRORS:
+            return _NET_ERRORS[args[0]]
+        if len(args) > 1:
+            text = args[1]  # mbedtls: (code, text)
+    return clip(text, DISPLAY_WIDTH - 6) or type(error).__name__
 
 
 # ── time ────────────────────────────────────────

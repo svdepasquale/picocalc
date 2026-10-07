@@ -1,6 +1,6 @@
 import time
 
-from pico_utils import clip as _clip_util
+from pico_utils import net_error as _net_error
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import read_key as _read_key, read_line as _read_line, poll_key as _poll_key
@@ -15,7 +15,6 @@ except ImportError:
 CREDENTIALS_FILE = "wifi_credentials.json"
 CONNECT_TIMEOUT_SECONDS = 8
 CONNECT_POLL_INTERVAL_MS = 300
-DISPLAY_LINE_CHARS = 32
 MENU_NETWORK_LIMIT = 9  # one key each
 WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
@@ -53,10 +52,6 @@ def _sta_wlan(active=False):
         wlan.active(True)
         _sleep_ms(WLAN_WARMUP_MS)  # the radio needs a moment after power-up
     return wlan
-
-
-def _clip(text, limit=DISPLAY_LINE_CHARS):
-    return _clip_util(text, limit)
 
 
 def _status_text(status):
@@ -268,7 +263,7 @@ def _scan_retry(wlan):
             if networks:
                 return networks
         except Exception as error:
-            print("Scan err:", _clip(error, 24))
+            print("Scan:", _net_error(error))
 
         if attempt < SCAN_RETRY_COUNT - 1:
             print("Scan retry")
@@ -378,7 +373,7 @@ def _sync_clock():
 
         clock_ntp.sync()
     except Exception as error:
-        print("NTP:", _clip(error, 24))
+        print("NTP:", _net_error(error))
 
 
 def saved():
