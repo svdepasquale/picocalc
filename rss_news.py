@@ -141,27 +141,32 @@ def _decode_entities(text):
 
 
 def _strip_tags(text):
-    source = str(text)
-    out = []
-    pos = 0
-    while pos < len(source):
-        lt = source.find("<", pos)
-        if lt < 0:
-            out.append(source[pos:])
-            break
-        nxt = source[lt + 1 : lt + 2]
-        if not (nxt.isalpha() or nxt in ("/", "!", "?")):
-            # a bare "<" in text (e.g. "a < b") is not a tag
-            out.append(source[pos : lt + 1])
-            pos = lt + 1
-            continue
-        if lt > pos:
-            out.append(source[pos:lt])
-        gt = source.find(">", lt)
+    # Each tag becomes a space ("</p><p>", "<br/>" end words; _clean_text
+    # collapses the doubles). Works on the pieces between "<"s: a find()
+    # from a position in a long str rescans it from its start on MicroPython.
+    if "<" not in text:
+        return text
+    parts = iter(text.split("<"))
+    out = [next(parts)]
+    tag = None  # pieces of a tag with a "<" inside (an attribute), to its ">"
+    for part in parts:
+        if tag is None:
+            nxt = part[:1]
+            if not (nxt.isalpha() or nxt in ("/", "!", "?")):
+                # a bare "<" in text (e.g. "a < b") is not a tag
+                out.append("<")
+                out.append(part)
+                continue
+            tag = []
+        gt = part.find(">")
         if gt < 0:
-            out.append(source[lt:])  # unterminated: text, not a tag
-            break
-        pos = gt + 1
+            tag.append(part)
+            continue
+        tag = None
+        out.append(" ")
+        out.append(part[gt + 1 :])
+    if tag:
+        out.append("<" + "<".join(tag))  # unterminated: text, not a tag
     return "".join(out)
 
 

@@ -362,6 +362,19 @@ def test_clean_text():
     check("cdata html", rss_news._clean_text("<![CDATA[<p>l&rsquo;Italia &hellip;</p>]]>"), "l'Italia ...")
 
 
+def test_strip_tags():
+    check(
+        "a tag ends a word",
+        rss_news._clean_text("<p>Primo paragrafo.</p><p>Secondo.</p><li>Uno</li><li>Due</li>riga<br/>dopo"),
+        "Primo paragrafo. Secondo. Uno Due riga dopo",
+    )
+    check("< in an attribute", rss_news._clean_text('x <a title="x<y">text</a> z'), "x text z")
+    check("unterminated is text", rss_news._clean_text("a<b c<d e"), "a<b c<d e")
+    check("tag, then unterminated", rss_news._clean_text("x <b y> z <c"), "x z <c")
+    check("comment, pi", rss_news._clean_text("<!-- c --> after <?xml ?> <br/>end"), "after end")
+    check("no tag", rss_news._strip_tags("a > b"), "a > b")
+
+
 def test_parse_feed():
     xml = (
         "<rss><channel><title>C</title>"
