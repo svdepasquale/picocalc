@@ -10,10 +10,10 @@ import sys
 from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
 from pico_utils import paint as _paint, pick as _pick, screen_header as _screen_header
 from pico_utils import wait_key as _wait_key
-from pico_utils import GREY
+from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-07.1"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
@@ -93,27 +93,39 @@ def _compile(path):
         return source
 
 
+def _take_screen():
+    # The app gave gfx's console up (gfx.end(), or console_suspend() and an
+    # error): the rest would be drawn by the firmware terminal. resume() is
+    # not enough after end(), which drops the framebuffer too.
+    import gfx
+
+    if _CONSOLE[0] is not gfx.CON or gfx._FB[0] is None:
+        gfx.begin()
+        gfx.app()
+
+
 def run_app(path, name=None):
     """Run one app file as __main__. q in the app, an error, sys.exit() or
-    Ctrl+C come back here; modules it imported are dropped afterwards."""
+    Ctrl+C come back here; modules it imported are dropped afterwards, the
+    working directory and the launcher's screen console are put back."""
     folder = path.rsplit("/", 1)[0] or "/"
     added = folder not in sys.path
     if added:
         sys.path.append(folder)  # sibling imports; never shadows the toolkit
     loaded = set(sys.modules)
+    cwd = os.getcwd()  # the toolkit and its config files are found through it
+    console = _CONSOLE[0] is not None  # run from the launcher
     _clear_screen()
     ended = "end of"
+    failure = None
     try:
         exec(_compile(path), {"__name__": "__main__", "__file__": path})
     except (SystemExit, KeyboardInterrupt):
         pass
     except MemoryError:
-        gc.collect()
-        print("Out of memory.")
         ended = "stopped"
     except Exception as error:
-        print("")
-        _print_error(error)
+        failure = error
         ended = "error in"
     finally:
         for module in list(sys.modules):
@@ -121,8 +133,18 @@ def run_app(path, name=None):
                 del sys.modules[module]
         if added and folder in sys.path:
             sys.path.remove(folder)
+        os.chdir(cwd)
         gc.collect()
         _ensure_screen()
+        if console:
+            _take_screen()
+    # Reported only now: taking the screen back clears it.
+    if failure is not None:
+        print("")
+        _print_error(failure)
+        failure = None
+    elif ended == "stopped":
+        print("Out of memory.")
     _wait_key(_paint("-- {} {}: any key --".format(ended, name or path), GREY))
     return ended == "end of"
 

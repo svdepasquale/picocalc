@@ -1151,6 +1151,51 @@ def test_app_discover_and_run():
         _rmtree(folder)
 
 
+def test_app_puts_back_cwd_and_console():
+    # Apps may chdir (the toolkit and its config files are found through the
+    # cwd) or give the screen back to the terminal (gfx.end(), or
+    # console_suspend() and an error): run_app restores both.
+    import apps
+
+    folder = _HERE + "/_tmp_apps"
+    _rmtree(folder)
+    os.mkdir(folder)
+    cwd = os.getcwd()
+    saved_print = apps._print_error
+    try:
+        _write(folder + "/away.py", "import os\nos.chdir(" + repr(folder) + ")\n")
+        _write(folder + "/ender.py", "import gfx\ngfx.end()\n")
+        _write(folder + "/lender.py", "import pico_utils\npico_utils.console_suspend()\n1/0\n")
+        _write(folder + "/plain.py", "x = 1\n")
+        keys_from(b" ")
+        apps.run_app(folder + "/away.py")
+        check("cwd put back", os.getcwd(), cwd)
+        os.chdir(cwd)  # _HERE is relative on MicroPython: keep the rest independent
+
+        def body(fake, vt):
+            gfx.begin()
+            gfx.app()
+            keys_from(b" ")
+            apps.run_app(folder + "/ender.py")
+            check("console back after gfx.end()", (pu._CONSOLE[0] is gfx.CON, gfx._FB[0] is fake), (True, True))
+            seen = []
+            apps._print_error = lambda error: seen.append(pu._CONSOLE[0] is gfx.CON)
+            keys_from(b" ")
+            check("error after a suspend", apps.run_app(folder + "/lender.py"), False)
+            check("error shown once the console is back", seen, [True])
+            gfx.end()
+            keys_from(b" ")
+            apps.run_app(folder + "/plain.py")
+            check("from the REPL: no console", (pu._CONSOLE[0], gfx._FB[0]), (None, None))
+
+        _with_display(body)
+    finally:
+        pu._key_byte = _REAL_KEY_BYTE
+        apps._print_error = saved_print
+        os.chdir(cwd)
+        _rmtree(folder)
+
+
 def test_go_run_or_imported():
     # Executed rather than imported (mpremote run go.py, r on /go.py in
     # Files), go was never in sys.modules: dropping itself must not raise.
