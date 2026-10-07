@@ -1424,6 +1424,24 @@ def test_wifi_open_networks_and_nine():
     check("9 picks the ninth", wlan.joins, [("net7", "pw")])
 
 
+def test_wifi_one_scan_no_idle_wait():
+    up = FakeWlan(linked=True)
+    got = _with_wifi(up, lambda: check("already up", wifi_manager.auto_connect_or_prompt(), True))
+    check("no warm-up wait when up", got["sleeps"], [])
+
+    down = FakeWlan([_scan_item(b"cafe", -50)], up=False)
+
+    def run():
+        wifi_manager.save_credentials({"home": "p1"})  # saved, out of range
+        check("nothing chosen", wifi_manager.auto_connect_or_prompt(), False)
+
+    got = _with_wifi(down, run)
+    check("radio switched on", down.up, True)
+    check("one warm-up wait", got["sleeps"], [wifi_manager.WLAN_WARMUP_MS])
+    check("one scan for both", down.scans, 1)
+    check("chooser from it", got["shown"], ["1: cafe -50dBm"])
+
+
 class FakePoll:
     def __init__(self, ready):
         self.ready = ready

@@ -49,8 +49,9 @@ def _network_module():
 def _sta_wlan(active=False):
     network = _network_module()
     wlan = network.WLAN(network.STA_IF)
-    if active:
+    if active and not wlan.active():
         wlan.active(True)
+        _sleep_ms(WLAN_WARMUP_MS)  # the radio needs a moment after power-up
     return wlan
 
 
@@ -259,26 +260,33 @@ def choose_network(networks):
                 return visible_networks[selected_index - 1]
 
 
-def connect_saved_networks(wlan, credentials):
-    """True once connected, False if no saved network joined, None when
-    q/Esc cancelled (no next network is tried)."""
-    if not credentials:
-        print("No saved.")
-        return False
-
-    scanned_ssids = []
+def _scan_retry(wlan):
+    # scan_networks(), once more after a pause if it fails or finds nothing
     for attempt in range(SCAN_RETRY_COUNT):
         try:
             networks = scan_networks(wlan)
-            scanned_ssids = [found[0] for found in networks]
-            if scanned_ssids:
-                break
+            if networks:
+                return networks
         except Exception as error:
             print("Scan err:", _clip(error, 24))
 
         if attempt < SCAN_RETRY_COUNT - 1:
             print("Scan retry")
             _sleep_ms(SCAN_RETRY_DELAY_MS)
+    return []
+
+
+def connect_saved_networks(wlan, credentials, networks=None):
+    """True once connected, False if no saved network joined, None when
+    q/Esc cancelled (no next network is tried). networks: a scan_networks()
+    list to pick from; None scans here."""
+    if not credentials:
+        print("No saved.")
+        return False
+
+    if networks is None:
+        networks = _scan_retry(wlan)
+    scanned_ssids = [found[0] for found in networks]
 
     if scanned_ssids:
         candidates = [ssid for ssid in scanned_ssids if ssid in credentials]
@@ -311,26 +319,20 @@ def connect_saved_networks(wlan, credentials):
 
 def auto_connect_or_prompt(interactive=True):
     wlan = _sta_wlan(active=True)
-    _sleep_ms(WLAN_WARMUP_MS)
 
     if wlan.isconnected():
         print("Already up. IP:", wlan.ifconfig()[0])
         return True
 
     credentials = load_credentials()
-    joined = connect_saved_networks(wlan, credentials)
+    # one scan serves the saved networks and then the chooser
+    networks = _scan_retry(wlan) if credentials or interactive else []
+    joined = connect_saved_networks(wlan, credentials, networks)
     if joined or joined is None:
         return joined  # connected, or q/Esc: no chooser after a cancel
 
     if not interactive:
         print("No saved. Prompt off.")
-        return False
-
-    try:
-        networks = scan_networks(wlan)
-    except Exception as error:
-        print("Scan err:", _clip(error, 24))
-        print("No selection.")
         return False
 
     chosen = choose_network(networks)
