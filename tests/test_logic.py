@@ -527,6 +527,32 @@ def test_latest_stops_between_feeds():
         _rm(_TMP)
 
 
+def test_news_detail_one_pager():
+    # one pager for every field: a pager per field let a long summary
+    # scroll the lines above it off before the first prompt
+    pages = []
+    saved = (rss_news._paged_lines, rss_news._screen_header)
+    rss_news._paged_lines = lambda lines, page_lines=pu.PAGE_LINES: pages.append(lines)
+    rss_news._screen_header = lambda title, status=True: None
+    item = {
+        "source": "BBC World",
+        "date": "Sat, 04 Oct 2026 08:15:00 +0200",
+        "title": "Titolo",
+        "summary": "parola " * 60,
+        "link": "http://a",
+    }
+    try:
+        rss_news._render_news_detail(item, 1, 3)
+    finally:
+        rss_news._paged_lines, rss_news._screen_header = saved
+    check("one pager", len(pages), 1)
+    lines = pages[0]
+    check("source first", lines[0], "[2/3] BBC World")
+    check("title after the date", lines[lines.index("Title:") + 1], "Titolo")
+    check("summary, link last", ("Summary:" in lines, lines[-2:]), (True, ["Link:", "http://a"]))
+    check("lines fit the width", max(len(x) for x in lines) <= pu.DISPLAY_WIDTH, True)
+
+
 def test_fetch_feed_low_memory():
     # no 26 KB block free: a 16 KB read, allocated before the one request
     body = b"<rss><channel><item><title>One</title></item></channel></rss>"
@@ -579,6 +605,24 @@ def test_note_stamp_needs_clock():
         check("no stamp before sync", notes._ts(), "")
     finally:
         notes._clock_synced = saved
+
+
+def test_note_detail_one_pager():
+    # header and body through one pager: the body's own pager let a long
+    # note scroll the header off before the first prompt
+    pages = []
+    saved = (notes._paged_lines, notes._screen_header)
+    notes._paged_lines = lambda lines, page_lines=pu.PAGE_LINES: pages.append(lines)
+    notes._screen_header = lambda title, status=True: None
+    try:
+        note = {"t": "Spesa", "b": "pane\n" + "latte " * 40, "ts": "10-07 09:30", "done": True}
+        notes._render_note_detail(note, 0, 2)
+    finally:
+        notes._paged_lines, notes._screen_header = saved
+    check("one pager", len(pages), 1)
+    lines = pages[0]
+    check("header first", lines[:7], ["#1/2 [DONE]", "Date: 10-07 09:30", "Title:", "Spesa", "---", "Body:", "pane"])
+    check("body wrapped to the width", len(lines) > 8 and max(len(x) for x in lines) <= pu.DISPLAY_WIDTH, True)
 
 
 class ChunkRaw:

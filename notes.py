@@ -1,7 +1,7 @@
 import gc
 
 from pico_utils import clip as _clip
-from pico_utils import paged_print as _paged_print
+from pico_utils import wrap_text as _wrap_text
 from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
@@ -16,7 +16,7 @@ DATA_FILE = "notes_data.json"
 MAX_NOTES = 50
 MAX_NOTE_CHARS = 800
 MAX_TITLE_CHARS = 60
-MODULE_VERSION = "2026-10-04.3"
+MODULE_VERSION = "2026-10-07.1"
 
 _NOTES = None
 
@@ -135,16 +135,19 @@ def _render_note_summary(note, pos, total):
 
 
 def _render_note_detail(note, pos, total):
+    # one list, one pager: the body paged on its own count, so a long note
+    # scrolled the lines above it off the screen before the first prompt
     _screen_header("Note Detail")
     mark = " [DONE]" if note.get("done") else ""
-    print("#{}/{}{}".format(pos + 1, total, mark))
+    lines = ["#{}/{}{}".format(pos + 1, total, mark)]
     if note.get("ts"):
-        print("Date:", note["ts"])
-    print("Title:")
-    _paged_print(note.get("t", ""))
-    print("---")
-    print("Body:")
-    _paged_print(note.get("b", ""))
+        lines.append("Date: {}".format(note["ts"]))
+    lines.append("Title:")
+    lines.extend(_wrap_text(note.get("t", "")))
+    lines.append("---")
+    lines.append("Body:")
+    lines.extend(_wrap_text(note.get("b", "")))
+    _paged_lines(lines)
 
 
 def ls():

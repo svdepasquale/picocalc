@@ -2,7 +2,6 @@ import gc
 import time
 
 from pico_utils import clip as _clip
-from pico_utils import paged_print as _paged_print
 from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
@@ -105,22 +104,25 @@ def _render_news_summary(item, pos, total, preview_chars=DEFAULT_PREVIEW_CHARS):
 
 
 def _render_news_detail(item, pos, total):
+    # one list, one pager: a pager per field scrolled the lines above a
+    # long summary off the screen before the first prompt
     _screen_header("RSS Detail")
-    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18)))
+    lines = ["[{}/{}] {}".format(pos + 1, total, _clip(item.get("source", "?"), 18))]
     if item.get("date"):
-        print("Date:", item.get("date"))
-    print("Title:")
-    _paged_print(item.get("title", ""))
+        lines.extend(_wrap_text("Date: {}".format(item["date"])))
+    lines.append("Title:")
+    lines.extend(_wrap_text(item.get("title", "")))
 
     summary = item.get("summary", "")
     if summary:
-        print("Summary:")
-        _paged_print(summary)
+        lines.append("Summary:")
+        lines.extend(_wrap_text(summary))
 
     link = item.get("link", "")
     if link:
-        print("Link:")
-        _paged_print(link)
+        lines.append("Link:")
+        lines.extend(_wrap_text(link))
+    _paged_lines(lines)
 
 
 def _load_config():
