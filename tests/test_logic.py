@@ -1185,6 +1185,66 @@ def test_wifi_saved_forget():
         _rm(_TMP)
 
 
+class FakeWlan:
+    # network.WLAN(STA_IF) on cyw43: scan() hands out `items`; connect()
+    # reaches the status `reach` gives that SSID (default: still joining).
+    def __init__(self, items=(), reach=None, up=True, linked=False):
+        self.items = list(items)
+        self.reach = reach or {}
+        self.up = up
+        self.state = 3 if linked else 0
+        self.joins = []
+        self.scans = 0
+
+    def active(self, on=None):
+        if on is None:
+            return self.up
+        self.up = bool(on)
+
+    def scan(self):
+        self.scans += 1
+        return self.items
+
+    def connect(self, ssid, key):
+        self.joins.append((ssid, key))
+        self.state = self.reach.get(ssid, 1)
+
+    def disconnect(self):
+        self.state = 0
+
+    def status(self):
+        return self.state
+
+    def isconnected(self):
+        return self.state == 3
+
+    def ifconfig(self):
+        return ("10.0.0.7", "255.255.255.0", "10.0.0.1", "10.0.0.1")
+
+    def config(self, key):
+        return self.joins[-1][0] if self.joins else ""
+
+
+def _scan_item(ssid, rssi, auth=5):
+    # (ssid, bssid, channel, RSSI, security, hidden) as cyw43 reports them
+    return (ssid, b"\x02\x00\x00\x00\x00\x01", 6, rssi, auth, 1)
+
+
+def test_wifi_scan_skips_bad_names():
+    wlan = FakeWlan(
+        [
+            _scan_item(b"home", -60),
+            _scan_item(b"\xff\xfebad", -40),  # not UTF-8: 1.27 raised, the scan failed
+            _scan_item(b"\x00\x00\x00\x00", -45),  # hidden network
+            _scan_item(b"", -50),
+            _scan_item("caffè".encode(), -70),
+            _scan_item(b"home", -80),  # a second access point
+        ]
+    )
+    check("names, strongest first", [n[0] for n in wifi_manager.scan_networks(wlan)], ["home", "caffè"])
+    check("undecodable name is empty", wifi_manager._decode_ssid(b"\xc3"), "")
+
+
 class FakePoll:
     def __init__(self, ready):
         self.ready = ready

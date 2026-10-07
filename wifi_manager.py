@@ -22,7 +22,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-04.3"
+WIFI_MANAGER_VERSION = "2026-10-07.1"
 _NETWORK_MODULE = None
 
 
@@ -51,8 +51,14 @@ def _clip_ssid(ssid):
 
 
 def _decode_ssid(raw_ssid):
+    # SSIDs are bytes: hidden networks scan as NULs, and a name need not be
+    # UTF-8. MicroPython 1.27 raises UnicodeError on those even with
+    # errors="ignore": "" for a name that can't be shown.
     if isinstance(raw_ssid, bytes):
-        return raw_ssid.decode("utf-8", "ignore")
+        try:
+            return raw_ssid.strip(b"\x00").decode("utf-8")
+        except UnicodeError:
+            return ""
     return str(raw_ssid)
 
 
