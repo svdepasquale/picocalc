@@ -23,7 +23,7 @@ from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-04.1"
+MODULE_VERSION = "2026-10-07.1"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 2048  # samples per DMA buffer: 93 ms at 22,050 Hz
 SD_BAUDRATE = 8000000  # while playing: 214 KB/s measured, same data up to 20 MHz
@@ -324,6 +324,7 @@ def play_file(path, name=None):
     sd = _sd_card()
     ch = []
     free = []
+    ready = [1, 1]  # buffer k holds samples from the file not played yet
     stats = [0, 0, -1]  # frames played, gaps, last channel (-1: not yet known)
     counts = [0, 0]
     result = "end"
@@ -337,17 +338,24 @@ def play_file(path, name=None):
         if n:
             convert(raw, bufs[k], n, channels, bits, _volume)
         counts[k] = n
+        ready[k] = 1
         return n
 
     def done(dma):
+        # Buffer k finished and the DMA chained into the other. Only frames
+        # read from the file count as played: when the SD falls behind, the
+        # DMA replays a buffer not refilled yet, which moves nothing on.
         k = 0 if dma is ch[0] else 1
         dma.read = bufs[k]  # READ_ADDR isn't reloaded on a chain trigger
-        stats[0] += counts[k]
-        if k != stats[2] and (1 - k) in free:  # chained into a buffer not refilled yet
-            stats[1] += 1
+        fresh = ready[k]
+        ready[k] = 0
+        stats[0] += counts[k] * fresh
         if k == stats[2]:
             free.append(-1)  # the last buffer finished
-        else:
+            return
+        if not ready[1 - k]:  # chained into a buffer not refilled yet: a gap
+            stats[1] += 1
+        if fresh:  # a replayed buffer's refill is queued already
             free.append(k)
 
     try:
