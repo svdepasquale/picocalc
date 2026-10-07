@@ -128,6 +128,7 @@ def set_location(lat, lon, name=""):
     if not _save_config(config):
         print("Location not saved.")  # after save_json's own error line
         return False
+    _LAST_FETCH[2] = None  # its weather was for the old place
     label = _location_label(config["name"], lat_f, lon_f)
     print("Location:", label)
     return True
@@ -227,24 +228,38 @@ def show_location():
     return {"lat": lat, "lon": lon, "name": name}
 
 
-def now():
-    requests = _http_module()
-    if requests is None:
-        return None
+# ── one request ─────────────────────────────────
+# The current weather and the forecast come in one request: one TLS
+# handshake (~20 KB of mbedtls buffers) per screen. The menu's screen calls
+# now() then forecast(3): forecast() reuses a request made in the last
+# REUSE_MS, a failed one too (one "No WiFi", not two).
 
-    if not check_wifi():
+REPORT_DAYS = 3  # what now() fetches: the menu's forecast(3) then needs no request
+REUSE_MS = 5000
+_LAST_FETCH = [None, 0, None]  # data (None: failed), days, ticks (None: no fetch yet)
+
+
+def _days(days):
+    try:
+        return max(1, min(7, int(days)))
+    except Exception:
+        return 3
+
+
+def _fetch(days):
+    requests = _http_module()
+    if requests is None or not check_wifi():
         return None
 
     lat, lon, name = _get_location()
-    label = _location_label(name, lat, lon)
-    url = "{}?latitude={}&longitude={}&current_weather=true&timezone=auto".format(
-        API_URL, lat, lon
-    )
+    url = (
+        "{}?latitude={}&longitude={}&current_weather=true"
+        "&daily=temperature_2m_max,temperature_2m_min,weathercode"
+        "&forecast_days={}&timezone=auto"
+    ).format(API_URL, lat, lon, days)
 
     print(_paint("updating...", GREY))
     response = None
-    start = _ticks_ms()
-
     try:
         response = _http_request(requests, "GET", url)
         status = response.status_code
@@ -262,11 +277,33 @@ def now():
             except Exception:
                 pass
 
-    cw = data.get("current_weather")
-    del data
+    if not isinstance(data, dict):
+        print("Bad response.")
+        return None
+    return {
+        "current": data.get("current_weather"),
+        "daily": data.get("daily"),
+        "name": name,
+        "label": _location_label(name, lat, lon),
+    }
+
+
+def _weather(days, reuse=False):
+    # A new request; with reuse, the last one if it is recent and has the days.
+    last = _LAST_FETCH
+    if reuse and last[2] is not None and _ticks_diff(_ticks_ms(), last[2]) < REUSE_MS:
+        if last[0] is None or last[1] >= days:
+            return last[0]
+    data = _fetch(days)
+    last[0], last[1], last[2] = data, days, _ticks_ms()
+    gc.collect()  # the whole parsed response, of which data keeps a little
+    return data
+
+
+def _show_now(data, elapsed):
+    cw = data["current"]
     if not isinstance(cw, dict):
         print("Bad response.")
-        gc.collect()
         return None
 
     temp = cw.get("temperature", "?")
@@ -276,67 +313,49 @@ def now():
     wtime = cw.get("time", "")
 
     desc = WMO_CODES.get(code, "Code:{}".format(code))
-    elapsed = _ticks_diff(_ticks_ms(), start)
 
-    print(_paint(label, BWHITE) + "  " + _paint(desc, _sky_color(code)))
-    if not name:
+    print(_paint(data["label"], BWHITE) + "  " + _paint(desc, _sky_color(code)))
+    if not data["name"]:
         print("Tip: set_location(lat,lon,'CityName')")
     print("Now {}   wind {} km/h {}\u00b0".format(_temp(temp), wind, wdir))
     if wtime:
         print(_paint("at " + _clip(wtime, 20).replace("T", " ") + "  " + str(elapsed) + " ms", GREY))
 
-    result = {"temp": temp, "wind": wind, "wind_dir": wdir, "desc": desc, "time": wtime}
-    gc.collect()
-    return result
+    return {"temp": temp, "wind": wind, "wind_dir": wdir, "desc": desc, "time": wtime}
+
+
+def now():
+    start = _ticks_ms()
+    data = _weather(REPORT_DAYS)
+    if data is None:
+        return None
+    return _show_now(data, _ticks_diff(_ticks_ms(), start))
 
 
 def forecast(days=3):
-    requests = _http_module()
-    if requests is None:
+    num_days = _days(days)
+    data = _weather(num_days, reuse=True)
+    if data is None:
         return None
+    return _show_days(data, num_days)
 
-    if not check_wifi():
-        return None
 
-    try:
-        num_days = max(1, min(7, int(days)))
-    except Exception:
-        num_days = 3
-
-    lat, lon, name = _get_location()
-    label = _location_label(name, lat, lon)
-    url = (
-        "{}?latitude={}&longitude={}"
-        "&daily=temperature_2m_max,temperature_2m_min,weathercode"
-        "&timezone=auto&forecast_days={}"
-    ).format(API_URL, lat, lon, num_days)
-
-    print(_paint("next {} days".format(num_days), GREY))
-    response = None
+def report(days=REPORT_DAYS):
+    """Current weather and the forecast, from one request."""
+    num_days = _days(days)
     start = _ticks_ms()
-
-    try:
-        response = _http_request(requests, "GET", url)
-        status = response.status_code
-        if status != 200:
-            print("HTTP:", status)
-            return None
-        data = response.json()
-    except Exception as e:
-        print("Err:", _net_error(e))
+    data = _weather(num_days)
+    if data is None:
         return None
-    finally:
-        if response is not None:
-            try:
-                response.close()
-            except Exception:
-                pass
+    current = _show_now(data, _ticks_diff(_ticks_ms(), start))
+    print("")
+    return {"now": current, "days": _show_days(data, num_days)}
 
-    daily = data.get("daily")
-    del data
+
+def _show_days(data, num_days):
+    daily = data["daily"]
     if not isinstance(daily, dict):
         print("Bad response.")
-        gc.collect()
         return None
 
     dates = daily.get("time", [])
@@ -344,10 +363,7 @@ def forecast(days=3):
     tmin = daily.get("temperature_2m_min", [])
     codes = daily.get("weathercode", [])
 
-    elapsed = _ticks_diff(_ticks_ms(), start)
-
-    if not name:
-        print("Tip: set_location(lat,lon,'CityName')")
+    print(_paint("next {} days".format(num_days), GREY))
     forecast_data = []
     for i in range(min(num_days, len(dates))):
         d = str(dates[i]) if i < len(dates) else "?"
@@ -358,8 +374,6 @@ def forecast(days=3):
         desc = WMO_CODES.get(c, "?")
         print("{}  {} .. {}  {}".format(short_d, _temp(lo), _temp(hi), _paint(desc, _sky_color(c))))
         forecast_data.append({"date": d, "min": lo, "max": hi, "desc": desc})
-
-    gc.collect()
     return forecast_data
 
 
@@ -373,6 +387,7 @@ def help():
     print("now()/w()     Current weather")
     print("forecast(d)   Forecast 1-7 days")
     print("  fc(d)       Alias for forecast")
+    print("report(d)/r(d) Both, one request")
     print("set_city(name)  Set by city")
     print("set_location(lat,lon,name)")
     print("  Set by coordinates")
@@ -390,6 +405,10 @@ def w():
 
 def fc(days=3):
     return forecast(days)
+
+
+def r(days=REPORT_DAYS):
+    return report(days)
 
 
 def sc(name):

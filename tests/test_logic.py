@@ -1007,12 +1007,14 @@ def _with_weather(body, online=True):
     weather.CONFIG_FILE = _TMP
     weather.check_wifi = lambda: online
     weather.print = lambda *a, **k: out.append(" ".join(str(x) for x in a))
+    weather._LAST_FETCH[:] = [None, 0, None]
     try:
         body()
     finally:
         for name, value in zip(_WEATHER_STUBS, saved):
             setattr(weather, name, value)
         del weather.print
+        weather._LAST_FETCH[:] = [None, 0, None]
         _rm(_TMP)
     return out
 
@@ -1023,6 +1025,57 @@ def test_weather_network_error_in_words():
         check("no weather", weather.now(), None)
 
     check("said in words", "Err: DNS failed" in _with_weather(run), True)
+
+
+_WEATHER_BODY = (
+    b'{"current_weather": {"temperature": 18.5, "windspeed": 7.2, "winddirection": 200,'
+    b' "weathercode": 2, "time": "2026-10-07T10:00"},'
+    b' "daily": {"time": ["2026-10-07", "2026-10-08", "2026-10-09"],'
+    b' "temperature_2m_max": [21.5, 19.5, 17.0], "temperature_2m_min": [12.0, 11.5, 9.0],'
+    b' "weathercode": [2, 61, 3]}}'
+)
+
+
+def test_weather_one_request():
+    # the menu's screen calls now() then forecast(3): one TLS handshake
+    clock = [0]
+    req = ScriptedRequests([HttpResponse(200, _WEATHER_BODY) for _ in range(6)])
+
+    def run():
+        weather._ticks_ms = lambda: clock[0]
+        weather._http_module = lambda: req
+        check("now", weather.now()["temp"], 18.5)
+        check("forecast", [d["max"] for d in weather.forecast(3)], [21.5, 19.5, 17.0])
+        check("one request", len(req.calls), 1)
+        query = req.calls[0][1]
+        check("one query for both", ("current_weather=true" in query, "forecast_days=3" in query), (True, True))
+        weather.now()  # the screen's "r": always a new request
+        check("refresh asks again", len(req.calls), 2)
+        weather.forecast(5)
+        check("more days ask again", len(req.calls), 3)
+        clock[0] += weather.REUSE_MS
+        weather.forecast(3)
+        check("stale asks again", len(req.calls), 4)
+        weather.set_location(45.5, 9.25, "Milano")
+        weather.forecast(3)
+        check("new place asks again", len(req.calls), 5)
+        both = weather.report()
+        check("report: both, one request", (both["now"]["desc"], len(both["days"]), len(req.calls)), ("Partly cloudy", 3, 6))
+
+    _with_weather(run)
+
+
+def test_weather_offline_once():
+    checks = []
+
+    def run():
+        weather._http_module = lambda: object()
+        weather.check_wifi = lambda: checks.append(1)  # None: offline
+        check("now offline", weather.now(), None)
+        check("forecast offline", weather.forecast(3), None)
+
+    _with_weather(run)
+    check("one No WiFi", len(checks), 1)
 
 
 # ── synthesizer / calc ──────────────────────────
