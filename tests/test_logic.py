@@ -1245,6 +1245,91 @@ def test_wifi_scan_skips_bad_names():
     check("undecodable name is empty", wifi_manager._decode_ssid(b"\xc3"), "")
 
 
+class FakeNetwork:
+    # the network module of the rp2 port: cyw43 link states as STAT_*
+    STA_IF = 0
+    STAT_IDLE = 0
+    STAT_CONNECTING = 1
+    STAT_GOT_IP = 3
+    STAT_CONNECT_FAIL = -1
+    STAT_NO_AP_FOUND = -2
+    STAT_WRONG_PASSWORD = -3
+
+    def __init__(self, wlan):
+        self.wlan = wlan
+
+    def WLAN(self, interface):
+        return self.wlan
+
+
+_WIFI_STUBS = (
+    "_NETWORK_MODULE",
+    "CREDENTIALS_FILE",
+    "_sleep_ms",
+    "_ticks_ms",
+    "_poll_key",
+    "_read_key",
+    "_read_line",
+    "_screen_header",
+    "_paged_lines",
+    "_sync_clock",
+)
+
+
+def _with_wifi(wlan, body, keys=(), line=None, polls=()):
+    # body() against a fake radio, keyboard and clock (500 ms a reading);
+    # returns what wifi_manager printed, its sleeps, the chooser's lines
+    # and the password prompts.
+    w = wifi_manager
+    saved = [getattr(w, name) for name in _WIFI_STUBS]
+    got = {"out": [], "sleeps": [], "shown": [], "prompts": []}
+    keys = list(keys)
+    polls = list(polls)
+    clock = [0]
+
+    def tick():
+        clock[0] += 500
+        return clock[0]
+
+    def read_line(prompt, mask=None):
+        got["prompts"].append(prompt)
+        return line
+
+    w._NETWORK_MODULE = FakeNetwork(wlan)
+    w.CREDENTIALS_FILE = _TMP
+    w._sleep_ms = got["sleeps"].append
+    w._ticks_ms = tick
+    w._poll_key = lambda: polls.pop(0) if polls else None
+    w._read_key = lambda timeout_ms=None: keys.pop(0) if keys else "q"
+    w._read_line = read_line
+    w._screen_header = lambda *a, **k: None
+    w._paged_lines = lambda lines, page_lines=8: got["shown"].extend(lines)
+    w._sync_clock = lambda: None
+    w.print = lambda *a, **k: got["out"].append(" ".join(str(x) for x in a))
+    try:
+        body()
+    finally:
+        for name, value in zip(_WIFI_STUBS, saved):
+            setattr(w, name, value)
+        del w.print
+        _rm(_TMP)
+    return got
+
+
+def test_wifi_cancel_stops():
+    # q/Esc while joining: no "Fail", no next network, no chooser after it
+    wlan = FakeWlan([_scan_item(b"home", -50), _scan_item(b"office", -60)])
+
+    def run():
+        wifi_manager.save_credentials({"home": "p1", "office": "p2"})
+        check("cancel is not a failure", wifi_manager.auto_connect_or_prompt(), None)
+
+    got = _with_wifi(wlan, run, polls=["q"])
+    check("first network only", wlan.joins, [("home", "p1")])
+    check("said once, no Fail", [l for l in got["out"] if l == "Cancelled." or l.startswith("Fail")], ["Cancelled."])
+    check("no chooser", (wlan.scans, got["shown"]), (1, []))
+
+
 class FakePoll:
     def __init__(self, ready):
         self.ready = ready

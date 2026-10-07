@@ -137,6 +137,7 @@ def scan_networks(wlan):
 
 
 def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
+    """True once connected, False if not, None when q/Esc cancelled it."""
     network = _network_module()
 
     if wlan.isconnected():
@@ -160,7 +161,7 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
         if _poll_key() in ("q", "Q", "esc"):
             wlan.disconnect()
             print("Cancelled.")
-            return False
+            return None
 
         _sleep_ms(CONNECT_POLL_INTERVAL_MS)
 
@@ -235,6 +236,8 @@ def choose_network(networks):
 
 
 def connect_saved_networks(wlan, credentials):
+    """True once connected, False if no saved network joined, None when
+    q/Esc cancelled (no next network is tried)."""
     if not credentials:
         print("No saved.")
         return False
@@ -268,7 +271,10 @@ def connect_saved_networks(wlan, credentials):
 
     for ssid in limited_candidates:
         print("Try:", _clip_ssid(ssid))
-        if connect_to_wifi(wlan, ssid, credentials[ssid]):
+        joined = connect_to_wifi(wlan, ssid, credentials[ssid])
+        if joined is None:
+            return None
+        if joined:
             print("OK:", _clip_ssid(ssid))
             print("IP:", wlan.ifconfig()[0])
             _sync_clock()
@@ -287,8 +293,9 @@ def auto_connect_or_prompt(interactive=True):
         return True
 
     credentials = load_credentials()
-    if connect_saved_networks(wlan, credentials):
-        return True
+    joined = connect_saved_networks(wlan, credentials)
+    if joined or joined is None:
+        return joined  # connected, or q/Esc: no chooser after a cancel
 
     if not interactive:
         print("No saved. Prompt off.")
@@ -315,7 +322,10 @@ def auto_connect_or_prompt(interactive=True):
         return False
 
     print("Connecting:", _clip_ssid(selected_ssid))
-    if connect_to_wifi(wlan, selected_ssid, password):
+    joined = connect_to_wifi(wlan, selected_ssid, password)
+    if joined is None:
+        return None
+    if joined:
         credentials[selected_ssid] = password
         save_credentials(credentials)
         print("OK. Saved.")
