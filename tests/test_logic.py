@@ -920,6 +920,37 @@ def test_calc_ans_chaining():
         sc._LAST = saved
 
 
+def test_calc_prompt():
+    # What the calc's help lists works at its prompt: deg, rad, history...
+    # as commands; ln, store() and recall() in expressions.
+    saved = (sc.safe_input, sc._calc_help, sc.clip, sc._LAST, list(sc._HISTORY), dict(sc._VARS), sc.DEG_MODE)
+    script = ["2^10", "^2", "deg", "sin(90)", 'store("r", 7)', "r*2", "ln(1)", 'recall("r")']
+    script += ["nope + 1", "history", "last", "variables()", "h", "rad()", "q"]
+    helps = []
+    limits = []
+    real_clip = sc.clip
+    try:
+        sc._LAST = None
+        del sc._HISTORY[:]
+        sc._VARS.clear()
+        sc.safe_input = lambda prompt: script.pop(0)
+        sc._calc_help = lambda: helps.append(1)
+        sc.clip = lambda text, limit: limits.append(limit) or real_clip(text, limit)
+        sc.calc()
+        check("results kept", [item["result"] for item in sc._HISTORY], [1024, 1048576, 1, 14, 0])
+        check("store() at the prompt", sc._VARS, {"r": 7})
+        check("the calc's own help", helps, [1])
+        check("deg and rad() switch", sc.DEG_MODE, False)
+        check("errors clipped to the screen", sc.DISPLAY_WIDTH - 5 in limits, True)
+        check("every line read", script, [])
+    finally:
+        sc.safe_input, sc._calc_help, sc.clip, sc._LAST = saved[:4]
+        sc._HISTORY[:] = saved[4]
+        sc._VARS.clear()
+        sc._VARS.update(saved[5])
+        sc.DEG_MODE = saved[6]
+
+
 # ── rss_news: Miniflux ──────────────────────────
 
 _MF_BODY = (

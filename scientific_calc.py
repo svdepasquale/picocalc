@@ -139,6 +139,7 @@ def _calc_namespace():
         "acos": lambda x: _from_rad(math.acos(x)),
         "atan": lambda x: _from_rad(math.atan(x)),
         "sqrt": math.sqrt,
+        "ln": math.log,
         "log": _calc_log,
         "log10": math.log10,
         "log2": lambda x: _calc_log(x, 2),
@@ -159,6 +160,8 @@ def _calc_namespace():
         "f2c": lambda fahrenheit: (fahrenheit - 32) * 5.0 / 9.0,
         "km2mi": lambda km: km * 0.621371,
         "mi2km": lambda mi: mi / 0.621371,
+        "store": _calc_store,
+        "recall": _calc_recall,
     }
     for key, value in _VARS.items():
         namespace[key] = value
@@ -418,6 +421,40 @@ def clear_history():
     return True
 
 
+def _calc_store(name, value=None):
+    store(name, value)  # prints name=value: nothing left to show or keep
+
+
+def _calc_recall(name):
+    recall(name)
+
+
+# Typed alone at the prompt, "()" optional. They print their own answer;
+# through eval, history() would have landed in its own list.
+_COMMANDS = {
+    "deg": deg,
+    "rad": rad,
+    "mode": mode,
+    "history": history,
+    "last": last,
+    "variables": variables,
+}
+
+
+def _calc_help():
+    # What works at the prompt; help() lists the REPL functions.
+    print("-- Calculator ({}) --".format("degrees" if DEG_MODE else "radians"))
+    print("2^10 or 2**10  power      7%3  remainder")
+    print("+5 *2 ^2       continue from ans (last result)")
+    print("sin cos tan asin acos atan   deg / rad: mode")
+    print("sqrt exp ln log10 log2 log(x,base) abs")
+    print("ceil floor factorial(n) hypot(x,y)  pi e")
+    print("d2r r2d c2f f2c km2mi mi2km  conversions")
+    print('store("r") keeps ans as r: then r*2')
+    print('recall("r")  variables  history  last')
+    print("q or empty line  exit")
+
+
 def calc():
     screen_header("Calculator")
     print("expr h=help q/empty=exit")
@@ -437,8 +474,13 @@ def calc():
             if expr in ("q", "quit", "exit"):
                 break
 
-            if expr == "h":
-                help()
+            if expr in ("h", "help"):
+                _calc_help()
+                continue
+
+            command = _COMMANDS.get(expr[:-2] if expr.endswith("()") else expr)
+            if command is not None:
+                command()
                 continue
 
             if len(expr) > MAX_EXPR_LEN:
@@ -449,12 +491,13 @@ def calc():
                 expr = _prepare_expr(expr)
                 namespace = _calc_namespace()
                 result = eval(expr, {"__builtins__": {}}, namespace)
-                _print_result(expr, result)
+                if result is not None:  # store() and recall() print their own
+                    _print_result(expr, result)
             except MemoryError:
                 print("Too complex.")
                 gc.collect()
             except Exception as err:
-                print("Err:", clip(str(err), 26))
+                print("Err:", clip(str(err), DISPLAY_WIDTH - 5))
     except KeyboardInterrupt:
         pass
     finally:
