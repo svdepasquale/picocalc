@@ -1780,6 +1780,38 @@ def test_clock_live():
     check("hint printed once", text.count("any key"), 1)
 
 
+def test_clock_zone_saves():
+    import clock_ntp
+
+    saves = []
+    ok = [True]
+    out = []
+
+    def save(data):
+        saves.append(dict(data))
+        return ok[0]
+
+    saved = _swap(
+        clock_ntp,
+        {
+            "_load_config": lambda: {"utc_offset": 1, "dst": "eu"},
+            "_save_config": save,
+            "print": lambda *args, **kw: out.append(" ".join(str(a) for a in args)),
+        },
+    )
+    try:
+        check("same offset: no flash write", (clock_ntp.set_utc_offset(1), saves), (True, []))
+        check("same summer time: no flash write", (clock_ntp.set_dst(True), saves), (True, []))
+        ok[0] = False
+        check("failed save reported", (clock_ntp.set_utc_offset(0), out[-1]), (False, "UTC offset not saved."))
+        check("failed DST save reported", (clock_ntp.set_dst(False), out[-1]), (None, "EU DST not saved."))
+        ok[0] = True
+        check("new offset saved", (clock_ntp.set_utc_offset(0), saves[-1]), (True, {"utc_offset": 0, "dst": "eu"}))
+        check("summer time off saved", (clock_ntp.set_dst(False), saves[-1]), (False, {"utc_offset": 1}))
+    finally:
+        _unswap(clock_ntp, saved)
+
+
 def test_status_text_battery():
     saved = (pu.battery, pu.wifi_connected, pu.clock_synced, pu.utc_offset_hours)
     try:

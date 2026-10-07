@@ -63,20 +63,27 @@ def set_utc_offset(hours):
         print("Range: -12..+14")
         return False
     config = _load_config()
-    config["utc_offset"] = val
-    _save_config(config)
+    if config.get("utc_offset") != val:  # no flash write for the same zone
+        config["utc_offset"] = val
+        if not _save_config(config):
+            print("UTC offset not saved.")
+            return False
     print("UTC offset:", val)
     return True
 
 
 def set_dst(on=True):
-    """EU summer time on top of the UTC offset (Italy: set_utc_offset(1))."""
+    """EU summer time on top of the UTC offset (Italy: set_utc_offset(1)).
+    Returns the setting, None when it couldn't be saved."""
     config = _load_config()
-    if on:
-        config["dst"] = "eu"
-    elif "dst" in config:
-        del config["dst"]
-    _save_config(config)
+    if bool(on) != (config.get("dst") == "eu"):  # no flash write when unchanged
+        if on:
+            config["dst"] = "eu"
+        else:
+            del config["dst"]
+        if not _save_config(config):
+            print("EU DST not saved.")
+            return None
     print("EU DST:", "on" if on else "off")
     return bool(on)
 
