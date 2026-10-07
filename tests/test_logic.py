@@ -636,6 +636,23 @@ def test_format_result():
     check("nan", sc._format_result(float("nan")), "nan")
 
 
+def test_format_result_float32():
+    # rp2 floats are float32: the values the device produces, shown as there.
+    saved = sc._SINGLE
+    try:
+        sc._SINGLE = True
+        check("1e11", sc._format_result(99999997952.0), "1e+11")
+        check("100000000/3", sc._format_result(33333334.0), "3.333333e+07")
+        check("exp(20)", sc._format_result(485165184.0), "4.851652e+08")
+        check("integral below 1e7", sc._format_result(9999999.0), "9999999")
+        check("1/3", sc._format_result(0.3333333432674408), "0.3333333")
+        check("small negative", sc._format_result(-1.2345678e-05), "-1.234568e-05")
+        check("history column: fewer digits", sc._format_result(33333334.0, 10), "3.3333e+07")
+        check("ints stay exact", sc._format_result(2 ** 40), "1099511627776")
+    finally:
+        sc._SINGLE = saved
+
+
 # ── notes ───────────────────────────────────────
 
 import notes
@@ -875,8 +892,11 @@ def test_calc_ans_chaining():
         check("+ chains", sc._prepare_expr("+5"), "ans+5")
         check("* chains", sc._prepare_expr("*2"), "ans*2")
         check("- stays negative", sc._prepare_expr("-5"), "-5")
+        check("^2 chains as a power", sc._prepare_expr("^2"), "ans**2")
         sc._LAST = None
         check("no ans yet", sc._prepare_expr("+5"), "+5")
+        check("^ is a power, not XOR", eval(sc._prepare_expr("2^10")), 1024)
+        check("10^3", eval(sc._prepare_expr("10^3")), 1000)
     finally:
         sc._LAST = saved
 

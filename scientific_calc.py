@@ -5,7 +5,7 @@ from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen,
 from pico_utils import DISPLAY_WIDTH
 
 
-MODULE_VERSION = "2026-10-04.2"
+MODULE_VERSION = "2026-10-07.1"
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
 MAX_VARS = 50
@@ -14,6 +14,9 @@ DEG_MODE = False
 _HISTORY = []
 _LAST = None
 _VARS = {}
+# rp2 floats are float32: ~7 significant digits, and every float from 2**24
+# up is integral (1e11 is 99999997952.0 there).
+_SINGLE = 16777217.0 == 16777216.0
 
 
 def _store(expr, result):
@@ -44,20 +47,37 @@ def _fit_int(value, width):
     return "{}{}e{}".format(sign, mantissa, exp)
 
 
+def _fit_float(value, width):
+    # The digits float32 holds, fewer if the column is narrow (history):
+    # never a clipped exponent.
+    for digits in range(7, 0, -1):
+        text = ("{:." + str(digits) + "g}").format(value)
+        if len(text) <= width:
+            break
+    return text
+
+
 def _format_result(value, width=DISPLAY_WIDTH - 2):
     if isinstance(value, float):
         if math.isinf(value) or math.isnan(value):
             return str(value)
-        if abs(value) < 1e15 and value == int(value):
+        # An int only where float32 is still exact to the unit: past that
+        # its noise printed as digits (1e11 showed 99999997952, exp(20)
+        # 485165184).
+        if abs(value) < (1e7 if _SINGLE else 1e15) and value == int(value):
             value = int(value)
+        elif _SINGLE:
+            return _fit_float(value, width)
     if isinstance(value, int):
         return _fit_int(value, width)
     return clip(str(value), width)
 
 
 def _prepare_expr(expr):
-    # Like a desk calculator: "+5" or "*2" continues from the last result.
-    # A leading "-" stays a negative number.
+    # ^ is the power, as on calculators (Python's XOR made 2^10 show 8).
+    # Like a desk calculator: "+5", "*2" or "^2" continues from the last
+    # result. A leading "-" stays a negative number.
+    expr = expr.replace("^", "**")
     if _LAST is not None and expr[:1] in ("+", "*", "/", "%"):
         return "ans" + expr
     return expr
