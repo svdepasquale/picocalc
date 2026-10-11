@@ -38,6 +38,8 @@ _APP_MODULES = (
     "apps",
     "snake",
     "settings",
+    "cal",
+    "transfer",
 )
 
 
@@ -261,6 +263,14 @@ def _setup():
     _load("settings").show()
 
 
+def _calendar():
+    _load("cal").show()
+
+
+def _transfer():
+    _load("transfer").serve()
+
+
 # ── hints: one cheap line of state next to some apps ──
 
 
@@ -316,6 +326,26 @@ def _hint_notes():
     return "{} open".format(open_count)
 
 
+def _hint_calendar():
+    from pico_utils import clock_synced, local_time
+
+    if not clock_synced():
+        return ""
+    t = local_time()
+    return "{} {} {}".format(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[t[6]], t[2], ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[t[1] - 1])
+
+
+def _hint_transfer():
+    if not _wifi_connected():
+        return "needs Wi-Fi"
+    try:
+        import network
+
+        return network.WLAN(network.STA_IF).ifconfig()[0]
+    except Exception:
+        return ""
+
+
 def _hint_settings():
     seconds = _settings()["sleep_s"]
     if not seconds:
@@ -337,6 +367,8 @@ _APPS = (
     ("m", "ƒ", "Music", _music, _hint_music),
     ("a", "►", "Apps", _apps, _hint_apps),
     ("s", "§", "Snake", _snake, _hint_snake),
+    ("c", "╬", "Calendar", _calendar, _hint_calendar),
+    ("t", "↕", "Transfer", _transfer, _hint_transfer),
     ("o", "τ", "Settings", _setup, _hint_settings),
 )
 _KEY_INDEX = dict((app[0], i) for i, app in enumerate(_APPS))
@@ -392,6 +424,14 @@ _ABOUT = {
     "s": (
         "Classic Snake: eat, grow and speed up without biting yourself. The best score is kept.",
         (("arrows/WASD", "steer"), ("p", "pause"), ("m", "sound")),
+    ),
+    "c": (
+        "The month with week numbers; Sundays and Italian holidays in red, Easter included.",
+        (("\u2190\u2192", "month"), ("\u2191\u2193", "year"), ("t", "today")),
+    ),
+    "t": (
+        "Files between a computer and the SD card over Wi-Fi: open the address shown in a browser, type the PIN.",
+        (("q", "stop"),),
     ),
     "o": (
         "Screen and keyboard light, when the screen dims and goes off, Wi-Fi at start, switching off. Power button: screen off.",

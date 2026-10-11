@@ -326,9 +326,9 @@ def test_weekday_and_eu_dst():
 def test_menu_imports():
     import menu
 
-    check("menu apps", len(menu._APPS), 14)
+    check("menu apps", len(menu._APPS), 16)
     check("one key each", len(menu._KEY_INDEX), len(menu._APPS))
-    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "m", "a", "s", "o")], [9, 10, 11, 12, 13])
+    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "m", "a", "s", "c", "t", "o")], [9, 10, 11, 12, 13, 14, 15])
     check("every app described", sorted(menu._ABOUT), sorted(app[0] for app in menu._APPS))
     # the logo and its status line still fit between the panel and the footer
     check("logo fits", menu._logo_top() + 5 * menu._BLOCK + 16 <= menu._FOOTER_Y, True)
