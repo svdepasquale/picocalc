@@ -10,14 +10,18 @@ from pico_utils import key_bar as _key_bar, load_json as _load_json, paint as _p
 from pico_utils import read_key as _read_key, read_line as _read_line
 from pico_utils import screen_header as _screen_header
 from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
-from pico_utils import refresh_status as _refresh_status
+from pico_utils import refresh_status as _refresh_status, status_version as _status_version
 from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
+from pico_utils import apply_settings as _apply_settings, screen_on as _screen_on
+from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
+WAIT_MS = 1000  # the menu looks at the status this often (a background join)
+READY_MS = [None]  # ticks_ms() when the menu was first drawn
 _BACK = ("q", "Q", "esc", "eof")
 _APP_MODULES = (
     "wifi_manager",
@@ -33,6 +37,7 @@ _APP_MODULES = (
     "music",
     "apps",
     "snake",
+    "settings",
 )
 
 
@@ -252,6 +257,10 @@ def _snake():
     _load("snake").play()
 
 
+def _setup():
+    _load("settings").show()
+
+
 # ── hints: one cheap line of state next to some apps ──
 
 
@@ -307,6 +316,13 @@ def _hint_notes():
     return "{} open".format(open_count)
 
 
+def _hint_settings():
+    seconds = _settings()["sleep_s"]
+    if not seconds:
+        return "screen stays on"
+    return "screen off {}".format("{} s".format(seconds) if seconds < 60 else "{} min".format(seconds // 60))
+
+
 _APPS = (
     ("1", "≈", "WiFi", _wifi, _hint_wifi),
     ("2", "»", "AI chat", _ai, _hint_ai),
@@ -321,6 +337,7 @@ _APPS = (
     ("m", "ƒ", "Music", _music, _hint_music),
     ("a", "►", "Apps", _apps, _hint_apps),
     ("s", "§", "Snake", _snake, _hint_snake),
+    ("o", "τ", "Settings", _setup, _hint_settings),
 )
 _KEY_INDEX = dict((app[0], i) for i, app in enumerate(_APPS))
 _ABOUT = {
@@ -375,6 +392,10 @@ _ABOUT = {
     "s": (
         "Classic Snake: eat, grow and speed up without biting yourself. The best score is kept.",
         (("arrows/WASD", "steer"), ("p", "pause"), ("m", "sound")),
+    ),
+    "o": (
+        "Screen and keyboard light, when the screen dims and goes off, Wi-Fi at start, switching off. Power button: screen off.",
+        (("←→", "change"), ("Enter", "do"), ("q", "back")),
     ),
 }
 
@@ -535,29 +556,22 @@ def _launch(index):
 
 
 def _autoconnect():
-    # Saved networks only; q/Esc skips while it tries.
-    if _wifi_connected():
+    # A saved network joins in the background (wifi_manager.start_join): the
+    # menu is up at once, the title bar says WiFi when the link is.
+    if not _settings()["autoconnect"] or _wifi_connected():
         return
-    w = _load("wifi_manager")
-    if not w.load_credentials():
-        return
-    gfx.app()
-    _screen_header("PicoCalc")
-    print("Connecting Wi-Fi...  " + _paint("q", BYELLOW) + " skips while connecting")
     try:
-        w.acs()
-    except KeyboardInterrupt:
-        pass
+        _load("wifi_manager").start_join()
     except Exception as error:
         print("WiFi:", error)
-    _refresh_status()
 
 
 def run(connect=True):
     """An app's key (or arrows + Enter) opens it; q (or Esc) leaves to the
     REPL, and so does mpremote/Thonny writing on USB.
-    connect: join a saved Wi-Fi network first."""
+    connect: join a saved Wi-Fi network (in the background)."""
     _ensure_screen()
+    _apply_settings()
     gfx.begin()
     note = ""
     try:
@@ -565,6 +579,7 @@ def run(connect=True):
     except _HostTakeover:
         note = " (USB host)"
     finally:
+        _screen_on()  # a REPL needs a screen
         gfx.end()  # never leave the REPL on the console
     print("REPL{}. Menu: import go".format(note))
 
@@ -575,16 +590,28 @@ def _loop(connect):
     selected = 0
     hints = _hints()
     redraw = True
+    status = _status_version()
+    titled = _ticks_ms()
     while True:
         if redraw:
             _draw(selected, hints)
             redraw = False
+            titled = _ticks_ms()
+            if READY_MS[0] is None:
+                READY_MS[0] = titled  # ticks start at 0 at power-on: the boot time
         try:
-            key = _read_key(REFRESH_MS)
+            key = _read_key(WAIT_MS)
         except KeyboardInterrupt:
             break
         if key is None:
-            gfx.title_bar("PicoCalc")
+            if status != _status_version():
+                # joined (or left) a network, the clock set: hints and title
+                status = _status_version()
+                hints = _hints()
+                redraw = True
+            elif _ticks_diff(_ticks_ms(), titled) >= REFRESH_MS:
+                gfx.title_bar("PicoCalc")
+                titled = _ticks_ms()
             continue
         if key in _BACK:
             break
@@ -602,6 +629,7 @@ def _loop(connect):
         selected = index
         _launch(index)
         hints = _hints()
+        status = _status_version()
         redraw = True
 
 

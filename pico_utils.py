@@ -402,9 +402,19 @@ STATUS_TTL_MS = 20000
 _STATUS = [None, 0, False, None]  # read at, UTC offset, Wi-Fi up, battery
 
 
+_STATUS_VER = [0]
+
+
 def refresh_status():
     # Next title bar re-reads Wi-Fi/battery/offset (after a connect, a zone change).
     _STATUS[0] = None
+    _STATUS_VER[0] += 1
+
+
+def status_version():
+    """Changes each time refresh_status() is called: a screen that shows the
+    status redraws when it differs from the value it drew with."""
+    return _STATUS_VER[0]
 
 
 def status_text():

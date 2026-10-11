@@ -4,7 +4,9 @@ from pico_utils import net_error as _net_error
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import read_key as _read_key, read_line as _read_line, poll_key as _poll_key
-from pico_utils import clock_synced as _clock_synced
+from pico_utils import clock_synced as _clock_synced, clean as _clean, save_json as _save_json
+from pico_utils import settings as _settings, set_setting as _set_setting
+from pico_utils import add_service as _add_service, refresh_status as _refresh_status
 
 try:
     import ujson as json
@@ -69,12 +71,16 @@ def _decode_ssid(raw_ssid):
     # SSIDs are bytes: hidden networks scan as NULs, and a name need not be
     # UTF-8. MicroPython 1.27 raises UnicodeError on those even with
     # errors="ignore": "" for a name that can't be shown.
+    # A name with control characters is left out the same way: printed, an
+    # ESC in it would drive the screen terminal (anyone nearby picks a name).
     if isinstance(raw_ssid, bytes):
         try:
-            return raw_ssid.strip(b"\x00").decode("utf-8")
+            name = raw_ssid.strip(b"\x00").decode("utf-8")
         except UnicodeError:
             return ""
-    return str(raw_ssid)
+    else:
+        name = str(raw_ssid)
+    return name if _clean(name) == name else ""
 
 
 def load_credentials():
@@ -90,46 +96,14 @@ def load_credentials():
 
 
 def save_credentials(credentials):
-    import os as _os
-    tmp = CREDENTIALS_FILE + ".tmp"
-    bak = CREDENTIALS_FILE + ".bak"
-    try:
-        with open(tmp, "w") as file:
-            json.dump(credentials, file)
-            try:
-                file.flush()
-            except Exception:
-                pass
-    except Exception as e:
-        print("Save err:", e)
-        return False
-    # Remove old backup
-    try:
-        _os.remove(bak)
-    except Exception:
-        pass
-    # Rename current to backup (so it's never deleted without a replacement ready)
-    try:
-        _os.rename(CREDENTIALS_FILE, bak)
-    except Exception:
-        pass
-    # Rename tmp to main
-    try:
-        _os.rename(tmp, CREDENTIALS_FILE)
-    except Exception as e:
-        print("Rename err:", e)
-        # Try to restore from backup
-        try:
-            _os.rename(bak, CREDENTIALS_FILE)
-        except Exception as re:
-            print("Restore err:", re)
-        return False
-    # Clean up backup on success
-    try:
-        _os.remove(bak)
-    except Exception:
-        pass
-    return True
+    # through .tmp/.bak, with the panel refresh held (pico_utils.save_json)
+    return _save_json(CREDENTIALS_FILE, credentials)
+
+
+def _remember(ssid):
+    # the network joined last is tried first at the next start
+    if ssid and _settings().get("wifi_last") != ssid:
+        _set_setting("wifi_last", ssid)
 
 
 def scan_networks(wlan):
@@ -305,6 +279,7 @@ def connect_saved_networks(wlan, credentials, networks=None):
         if status == got_ip:
             print("OK:", ssid)
             print("IP:", wlan.ifconfig()[0])
+            _remember(ssid)
             _sync_clock()
             return True
         _print_failure(status)
@@ -357,6 +332,7 @@ def auto_connect_or_prompt(interactive=True):
         # save_credentials() prints what failed; the link is up either way
         print("OK. Saved." if save_credentials(credentials) else "Connected, not saved.")
         print("IP:", wlan.ifconfig()[0])
+        _remember(selected_ssid)
         _sync_clock()
         return True
 
@@ -374,6 +350,106 @@ def _sync_clock():
         clock_ntp.sync()
     except Exception as error:
         print("NTP:", _net_error(error))
+
+
+# ── background join ─────────────────────────────
+# The launcher starts here instead of waiting on a scan and a connect:
+# connect() returns at once and the radio joins while the menu is up. The
+# saved networks are tried one after the other, the last one joined first,
+# with no scan (one blocks for ~2 s); once joined, the clock is set quietly.
+
+JOIN_TIMEOUT_MS = 12000  # per network
+NTP_RETRY_MS = 30000
+_JOIN = {}  # order: names left to try, ssid: the one tried, since: its start
+_NTP = [0, 0]  # quiet NTP tries, ticks of the last
+
+
+def start_join():
+    """Join a saved network in the background (pico_utils services): True if
+    a join started. The menu stays usable; the title bar says WiFi once up."""
+    credentials = load_credentials()
+    if not credentials:
+        return False
+    wlan = _sta_wlan()
+    if not wlan.active():
+        wlan.active(True)
+    if wlan.isconnected():
+        _joined(None)
+        return False
+    order = sorted(credentials)
+    last = _settings().get("wifi_last")
+    if last in credentials:
+        order.remove(last)
+        order.insert(0, last)
+    _JOIN.clear()
+    _JOIN["order"] = order
+    if not _join_next(wlan, credentials):
+        return False
+    _add_service(_join_service)
+    return True
+
+
+def joining():
+    """True while a background join is under way."""
+    return bool(_JOIN)
+
+
+def _join_next(wlan, credentials):
+    while _JOIN.get("order"):
+        ssid = _JOIN["order"].pop(0)
+        if ssid not in credentials:
+            continue
+        try:
+            wlan.connect(ssid, credentials[ssid])
+        except Exception:
+            continue
+        _JOIN["ssid"] = ssid
+        _JOIN["since"] = _ticks_ms()
+        return True
+    _JOIN.clear()
+    return False
+
+
+def _join_service(now, waiting):
+    if not _JOIN:
+        return False
+    wlan = _sta_wlan()
+    if wlan.isconnected():
+        ssid = _JOIN.get("ssid")
+        _JOIN.clear()
+        _joined(ssid)
+        return False
+    if wlan.status() < 0 or _ticks_diff(now, _JOIN["since"]) > JOIN_TIMEOUT_MS:
+        return _join_next(wlan, load_credentials())  # the next one, or give up
+    return True
+
+
+def _joined(ssid):
+    _refresh_status()
+    _remember(ssid)
+    if not _clock_synced():
+        _NTP[0] = 0
+        _add_service(_ntp_service)
+
+
+def _ntp_service(now, waiting):
+    # The clock, quietly: only in a key wait (a request blocks up to 2 s),
+    # three tries 30 s apart.
+    if _clock_synced():
+        return False
+    if not waiting or (_NTP[0] and _ticks_diff(now, _NTP[1]) < NTP_RETRY_MS):
+        return True
+    _NTP[0] += 1
+    _NTP[1] = now
+    try:
+        import clock_ntp
+
+        if clock_ntp.sync_quiet():
+            _refresh_status()
+            return False
+    except Exception:
+        pass
+    return _NTP[0] < 3
 
 
 def saved():

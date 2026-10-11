@@ -120,6 +120,19 @@ def sync():
     return False
 
 
+def sync_quiet(timeout=2):
+    """sync() with no output, for background use: True once the clock is set."""
+    try:
+        import ntptime
+
+        ntptime.host = NTP_HOST
+        ntptime.timeout = timeout
+        ntptime.settime()
+        return True
+    except Exception:
+        return False
+
+
 def now():
     lt, offset = _local_time()
     label = "UTC" + ("{:+d}".format(offset) if offset else "")

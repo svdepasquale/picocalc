@@ -251,4 +251,28 @@ def test_services_run_and_drop():
     with_pico(body)
 
 
+
+def test_settings_app_values():
+    import settings as app
+
+    check("never", app.duration(0), "never")
+    check("seconds", app.duration(30), "30 s")
+    check("minutes", app.duration(300), "5 min")
+    check("next", app.step(app.DIM_CHOICES, 60, 1), 120)
+    check("last stays", app.step(app.DIM_CHOICES, 0, 1), 0)
+    check("first stays", app.step(app.DIM_CHOICES, 15, -1), 15)
+    check("wraps", app.step(app.SLEEP_CHOICES, 0, 1, True), 60)
+    check("unknown: first", app.step(app.SLEEP_CHOICES, 7, 1), 60)
+    check("levels", app.step(tuple(range(1, 16)), 15, 1, True), 1)
+
+
+def test_settings_app_power_cycle():
+    import settings as app
+
+    answers = [True, True, False, False, True]
+    restarts = []
+    app.wait_power_cycle(lambda: answers.pop(0), lambda: restarts.append(1), lambda: None)
+    check("restart once back on", (restarts, answers), ([1], []))
+
+
 run(globals())

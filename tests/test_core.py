@@ -326,10 +326,13 @@ def test_weekday_and_eu_dst():
 def test_menu_imports():
     import menu
 
-    check("menu apps", len(menu._APPS), 13)
+    check("menu apps", len(menu._APPS), 14)
     check("one key each", len(menu._KEY_INDEX), len(menu._APPS))
-    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "m", "a", "s")], [9, 10, 11, 12])
+    check("new keys", [menu._KEY_INDEX[k] for k in ("0", "m", "a", "s", "o")], [9, 10, 11, 12, 13])
     check("every app described", sorted(menu._ABOUT), sorted(app[0] for app in menu._APPS))
+    # the logo and its status line still fit between the panel and the footer
+    check("logo fits", menu._logo_top() + 5 * menu._BLOCK + 16 <= menu._FOOTER_Y, True)
+    check("logo below the panel", menu._logo_top() > menu._PANEL_Y + menu._PANEL_H, True)
 
 
 def test_go_run_or_imported():

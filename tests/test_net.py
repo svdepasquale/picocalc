@@ -459,6 +459,47 @@ def _with_wifi(wlan, body, keys=(), line=None, polls=()):
     return got
 
 
+def test_wifi_background_join():
+    # The launcher's join: no scan, the last network first, the next one on
+    # a failure or a timeout, then remembered and the clock queued for NTP.
+    w = wifi_manager
+    names = ("_NETWORK_MODULE", "CREDENTIALS_FILE", "_settings", "_set_setting", "_add_service", "_ticks_ms", "_refresh_status", "_clock_synced")
+    saved = [getattr(w, name) for name in names]
+    wlan = FakeWlan(up=False, reach={"office": -2, "cafe": 1, "home": 3})
+    hooks = []
+    stored = {"wifi_last": "office"}
+    clock = [0]
+    try:
+        w._NETWORK_MODULE = FakeNetwork(wlan)
+        w.CREDENTIALS_FILE = TMP
+        w._settings = lambda: stored
+        w._set_setting = lambda name, value: stored.update({name: value})
+        w._add_service = hooks.append
+        w._ticks_ms = lambda: clock[0]
+        w._refresh_status = lambda: None
+        w._clock_synced = lambda: False
+        check("nothing saved", w.start_join(), False)
+        w.save_credentials({"home": "p1", "office": "p2", "cafe": "p3"})
+        check("started", w.start_join(), True)
+        check("radio on, last first, no scan", (wlan.up, wlan.joins, wlan.scans), (True, [("office", "p2")], 0))
+        join = hooks[0]
+        check("failed: next", join(0, True), True)
+        check("still joining", join(5000, True), True)
+        clock[0] = 20000
+        check("timed out: next", join(20000, True), True)
+        check("tried in turn", [j[0] for j in wlan.joins], ["office", "cafe", "home"])
+        check("joined: done", join(20500, True), False)
+        check("remembered", stored["wifi_last"], "home")
+        check("clock queued", hooks[-1], w._ntp_service)
+        check("not joining", w.joining(), False)
+        check("already up", w.start_join(), False)
+    finally:
+        for name, value in zip(names, saved):
+            setattr(w, name, value)
+        w._JOIN.clear()
+        rm_tmp(TMP)
+
+
 def test_wifi_cancel_stops():
     # q/Esc while joining: no "Fail", no next network, no chooser after it
     wlan = FakeWlan([_scan_item(b"home", -50), _scan_item(b"office", -60)])
