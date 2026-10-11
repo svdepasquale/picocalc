@@ -46,17 +46,23 @@ def check(name, got, want):
 # scratch files and folders, all tests/_tmp_* (git ignores them)
 
 
+# On the device these write the flash: like the toolkit, they hold the panel
+# refresh meanwhile (pico_utils.flash_write: core1 runs it from flash).
+
+
 def rm_tmp(path):
-    for p in (path, path + ".tmp", path + ".bak"):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
+    with pu.flash_write(path):
+        for p in (path, path + ".tmp", path + ".bak"):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def write_file(path, text):
-    with open(path, "w") as f:
-        f.write(text)
+    with pu.flash_write(path):
+        with open(path, "w") as f:
+            f.write(text)
 
 
 def rm_tree(path):
@@ -64,13 +70,14 @@ def rm_tree(path):
         names = os.listdir(path)
     except OSError:
         return
-    for name in names:
-        full = path + "/" + name
-        try:
-            os.remove(full)
-        except OSError:
-            rm_tree(full)
-    os.rmdir(path)
+    with pu.flash_write(path):
+        for name in names:
+            full = path + "/" + name
+            try:
+                os.remove(full)
+            except OSError:
+                rm_tree(full)
+        os.rmdir(path)
 
 
 # keys: feed raw bytes the way the PicoCalc driver emits them

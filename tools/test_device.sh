@@ -18,7 +18,6 @@ if [ $# -eq 0 ]; then
   set -- "$root"/tests/test_*.py
 fi
 script=$(mktemp "${TMPDIR:-/tmp}/picocalc_test.XXXXXX") || exit 1
-trap 'rm -f "$script"' EXIT
 trap 'exit 1' HUP INT TERM
 mp() {
   mpremote ${PICOCALC_PORT:+connect "$PICOCALC_PORT"} resume "$@"
@@ -34,16 +33,22 @@ fresh() {
     sleep 3
   done
 }
+# Output streams as it comes (a hang shows where it stopped); with GNU
+# timeout installed a file gets TEST_TIMEOUT seconds (default 300).
+log=$(mktemp "${TMPDIR:-/tmp}/picocalc_test_log.XXXXXX") || exit 1
+trap 'rm -f "$script" "$log"' EXIT
+limit=
+command -v timeout >/dev/null 2>&1 && limit="timeout ${TEST_TIMEOUT:-300}"
 status=0
 for file in "$@"; do
   echo "== ${file##*/}"
   { cat "$root/tests/harness.py"; echo; cat "$file"; } > "$script" || { status=1; continue; }
   fresh || { echo "device not answering after a reset"; status=1; break; }
-  out=$(mp run "$script" 2>&1) || status=1
-  printf '%s\n' "$out"
-  case $out in
+  # shellcheck disable=SC2086
+  $limit mpremote ${PICOCALC_PORT:+connect "$PICOCALC_PORT"} resume run "$script" 2>&1 | tee "$log"
+  case $(cat "$log") in
     *" tests, 0 failed"*) ;;
-    *) status=1 ;;
+    *) status=1; echo "(no clean summary: failed, cut or hung)" ;;
   esac
 done
 exit $status
