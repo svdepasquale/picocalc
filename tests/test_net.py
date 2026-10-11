@@ -416,6 +416,7 @@ _WIFI_STUBS = (
     "_screen_header",
     "_paged_lines",
     "_sync_clock",
+    "_remember",
 )
 
 
@@ -448,6 +449,7 @@ def _with_wifi(wlan, body, keys=(), line=None, polls=()):
     w._screen_header = lambda *a, **k: None
     w._paged_lines = lambda lines, page_lines=8: got["shown"].extend(lines)
     w._sync_clock = lambda: None
+    w._remember = lambda ssid: got["out"].append("remember " + str(ssid))
     w.print = lambda *a, **k: got["out"].append(" ".join(str(x) for x in a))
     try:
         body()
