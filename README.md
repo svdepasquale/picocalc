@@ -1,8 +1,13 @@
 # PicoCalc Toolkit
 
-Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Synthesizer + Files + Apps + Snake + System toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
+Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calculator + Synthesizer + Music + Files + Wi-Fi file transfer + Apps + Snake + Settings toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
 
-- a launcher menu that opens at power-on: one key per app, `q` to the REPL
+- a launcher menu that opens at power-on (2.4 s, Wi-Fi joins behind it):
+  one key per app, `q` to the REPL
+- power care: the screen dims and then goes off when idle (music keeps
+  playing), the power button switches the screen off, Settings switches the
+  PicoCalc off; brightness and keyboard light are kept
+- files from a computer's browser to the SD card over Wi-Fi (~290 KB/s)
 - a file manager (view, edit with the firmware's editor, run, delete) and
   an Apps list that runs any `.py` you drop in `/sd/apps`
 - single-key navigation (no Enter) in menus, viewers and pagers; arrows work
@@ -31,8 +36,17 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Notes + Weather + Scientific Calculator + Sy
 - `scientific_calc.py` → scientific calculator with trig, log, conversions, history
 - `music.py` → WAV player on the speakers and headphone jack (PWM + DMA)
 - `synthesizer.py` → tone/note/sequence synthesizer with piano interactive mode
+- `cal.py` → month calendar, ISO weeks, Italian holidays
+- `transfer.py` → Wi-Fi file transfer between a browser and the SD card
+- `settings.py` → lights, dimming and screen-off delays, Wi-Fi at start, switching off
+- `pico_net.py` → the toolkit's HTTP client (TLS checked where a key goes)
 
-Copy the `.py` files of the repo root to the Pico root (`tests/` stays on the computer).
+Deploy with `tools/deploy.sh` (needs `mpremote` and `mpy-cross`: `brew install
+micropython`): it compiles the modules to `.mpy` for the firmware's bytecode
+(they load 5-11x faster than `.py`: the launcher is up 2.4 s after power-on
+instead of 4.2), keeps `main.py`, `go.py` and `default_style.py` as source,
+copies with the panel refresh stopped and restarts the device;
+`tools/deploy.sh --py` sends plain sources. `tests/` stays on the computer.
 `sd/apps/hello.py` is a sample app: copy it to `/sd/apps/` on the card.
 
 Data files created automatically:
@@ -44,6 +58,7 @@ Data files created automatically:
 - `/weather_config.json` → location (lat, lon, name)
 - `/miniflux_config.json` → Miniflux URL + API key (optional)
 - `/snake.json` → Snake best score and sound setting
+- `/settings.json` → brightness, keyboard light, dim/screen-off delays, Wi-Fi at start (Settings)
 
 ## Launcher (standalone use)
 It opens by itself when the PicoCalc is switched on; from the REPL,
@@ -52,6 +67,7 @@ It opens by itself when the PicoCalc is switched on; from the REPL,
 ```
 1 WiFi   2 AI chat   3 News   4 Weather   5 Notes   6 Calculator
 7 Synth piano   8 Clock   9 System   0 Files   m Music   a Apps   s Snake
+c Calendar   t Transfer   o Settings
 ```
 
 - an app's key opens it; ↑/↓ and Enter work too
@@ -59,7 +75,10 @@ It opens by itself when the PicoCalc is switched on; from the REPL,
 - each app has its own one-key sub-menu (keys shown in yellow); `q`/Esc goes back
 - the title bar shows time, Wi-Fi and battery; some apps show a hint
   (Wi-Fi state, AI model, weather city, open notes)
-- at start it joins a saved Wi-Fi network (`q` skips) and sets the clock
+- at start it asks the radio to join a saved network (the last one used
+  first, no scan) and is drawn at once; the title bar says WiFi when the
+  link is up, and the clock is set from NTP behind it (Settings can turn
+  this off)
 - `q` leaves to the REPL; `import go` reopens it
 - `mpremote` or Thonny connecting over USB also leaves to the REPL, so
   they get it at once (the screen says `REPL (USB host)`)
@@ -549,7 +568,9 @@ flash root, where `sd/` is the SD card.
   saves, Esc or Ctrl+Q quits. Files over 32 KB are refused: the editor
   keeps the whole file in RAM
 - `r` runs a `.py` file the way the Apps list does
-- `d` deletes a file or an empty folder (asks `y`)
+- `d` deletes a file or an empty folder (asks `y`; a file in the flash
+  root, where the toolkit, its settings and the power-on hook live, asks
+  for the word `yes`)
 - `n` makes a new file (opens the editor), `m` a new folder
 - the viewer shows the first 32 KB, a page per key (Space/↓ next, ↑ back);
   binary files only show their size
@@ -589,6 +610,80 @@ Commands:
 steer, `p` pauses, `m` turns the sound off and on, `q` quits. Each food
 speeds it up; the best score is kept in `/snake.json`.
 
+## Calendar
+`c` in the launcher, or `import cal; cal.show()`. A month at a time,
+Monday first, with ISO week numbers; today is highlighted, Sundays and the
+Italian public holidays are red (Easter and Easter Monday computed), and
+the month's holidays are listed under the grid. ←/→ month, ↑/↓ year, `t`
+today, `q` back. `cal.easter(2027)`, `cal.holidays(2027)` and
+`cal.iso_week(2027, 1, 1)` work from the REPL.
+
+## Transfer (files over Wi-Fi)
+`t` in the launcher, or `import transfer; transfer.serve()`. While its
+screen is up the PicoCalc serves the SD card on the local network: open
+the address it shows (`http://<its IP>/`) in a browser on the same Wi-Fi,
+type the PIN shown on the PicoCalc, pick a folder, then download, upload
+(several files, with a progress bar) or delete. `q` closes it. Measured:
+~290 KB/s up and ~220 KB/s down (USB serial manages ~8 KB/s), so a
+26 MB WAV goes over in about a minute and a half.
+
+From a terminal:
+```
+curl -T song.wav -H "X-PIN: 123456" "http://192.168.1.50/api/put?dir=music&name=song.wav"
+curl -H "X-PIN: 123456" "http://192.168.1.50/api/ls?dir=music"
+curl -o song.wav "http://192.168.1.50/api/get?dir=music&name=song.wav&pin=123456"
+curl -X DELETE -H "X-PIN: 123456" "http://192.168.1.50/api/rm?dir=music&name=song.wav"
+```
+
+It is the only thing in the toolkit that listens on the network, so it is
+kept small: it runs only while its screen is open; a new 6-digit PIN each
+time, needed by every request but the page itself, and 10 wrong ones
+close it; the SD card only (the card's root and the folders directly in
+it), plain file names; uploads up to 64 MB land in a `.part` file that is
+renamed only once complete and removed if anything goes wrong.
+
+## Settings, power and the screen
+`o` in the launcher, or `import settings; settings.show()`. ↑/↓ choose,
+←/→ (or Enter) change, `q` back. Everything is kept in `/settings.json`.
+
+- **Screen brightness** (1-15) and **keyboard light** (off, 1-7): the
+  keyboard controller forgets them when the PicoCalc is switched off, so
+  the launcher sets them again at start. Alt+, and Alt+. (screen) and
+  Alt+Space (keys) still change them for the moment.
+- **Dim after** (default 1 min) and **screen off after** (default 5 min)
+  without a key. Screen off means a black picture, the backlight at the
+  controller's minimum and the keyboard light off; what was on screen
+  comes back with the next key, which does nothing else. Music keeps
+  playing with the screen off.
+- **Power button**, a short press: the screen goes off at once (if the
+  keyboard controller's firmware sends that key: check with System → `k`).
+- **Wi-Fi off in standby**: after a minute of screen off in a key wait,
+  Wi-Fi goes off too and joins again in the background on wake.
+- **Wi-Fi at start**: the launcher joins a saved network by itself.
+- **Switch off**: the keyboard controller switches the PicoCalc off after
+  6 seconds. On USB power the Pico itself stays on: it waits for the
+  PicoCalc to be switched on again and then restarts.
+
+## Security
+- Requests that carry a key (OpenRouter, a Miniflux token, a custom AI
+  endpoint's key) to a server on the internet check its TLS certificate
+  against four roots built into `pico_net.py` (Google Trust Services R1/R4,
+  ISRG X1/X2: OpenRouter and Let's Encrypt sites). That costs 1.4-2.6 s per
+  request and needs the clock set (the launcher sets it from NTP; the
+  check tries once more itself). A server signed by another authority is
+  refused with `certificate check failed` (until its root is added to
+  `pico_net.py`): never sent the key anyway. A key is never sent over
+  plain http to a server on the internet. Feeds and weather carry no key
+  and are not checked (faster).
+- Redirects keep the timeout, stop after three and never carry a key to
+  another server.
+- Text from outside (feed titles, AI replies, place names, Wi-Fi names, file
+  names) loses its control characters before it reaches the screen: an
+  escape sequence could otherwise drive the firmware terminal past the
+  end of the screen memory and corrupt the SD card.
+- Keys and passwords live in JSON files on flash, readable by anyone with
+  the device and a USB cable (as anything on it).
+
 ## Startup files on PicoCalc
 `boot.py` starts the screen, keyboard, SD card (`/sd`) and speakers. The
 official ClockworkPi firmware (2025-10-30 build) keeps it frozen inside the
@@ -600,7 +695,8 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - If still disconnected: run `w.ac()` and re-enter password.
 - Reset credentials: delete `/wifi_credentials.json` and run setup again.
 - If version mismatch after upload: reset or reconnect REPL, then `w.ver()`.
-- If AI says `Missing urequests.`: run `import mip; mip.install('urequests')`.
+- If AI says `certificate check failed`: the server's certificate is not signed by a root in `pico_net.py` (the provider changed CA): add its root there.
+- If AI says `clock not set: can't check the certificate`: Wi-Fi is up but NTP failed: Clock → `s`, then try again.
 - If AI says `No API key.`: run `ai.set_api_key('sk-or-v1-...')`.
 - If OpenRouter returns HTTP error: verify key/model and internet access.
 - If RSS says `Missing urequests.`: run `import mip; mip.install('urequests')`.
@@ -640,8 +736,16 @@ import weather as m        # m.r() m.w() m.fc() m.sc('Rome')
 import scientific_calc as sc # sc.sin() sc.sqrt() sc.calc()
 import music               # music.m() music.p(path) music.volume(n)
 import synthesizer as sy   # sy.piano() sy.tone() sy.use_pwm()
+import cal                 # cal.s() cal.easter(y) cal.holidays(y)
+import transfer            # transfer.s()
+import settings            # settings.s() settings.switch_off()
+import pico_utils as pu    # pu.backlight(n) pu.keyboard_light(n) pu.screen_off()
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-07.1` for the apps,
-`pico_utils` and `menu`, `2026-10-06.1` for `gfx_native`, `2026-10-06.7` for `gfx`.
+Check on device with `<module>.ver()`: `2026-10-11.1` for the modules
+changed or added on 2026-10-11 (`pico_utils`, `menu`, `wifi_manager`,
+`clock_ntp`, `settings`, `cal`, `transfer`, `pico_net`, `rss_news`,
+`openrouter_ai`, `weather`, `files`, `sys_status`, `music`, `apps`),
+`2026-10-07.1` for the others, `2026-10-06.1` for `gfx_native`,
+`2026-10-06.7` for `gfx`.

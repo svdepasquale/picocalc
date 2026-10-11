@@ -22,7 +22,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-07.1"
+WIFI_MANAGER_VERSION = "2026-10-11.1"
 _NETWORK_MODULE = None
 
 # wlan.status() in words, for the WiFi screen and failed connects: the rp2

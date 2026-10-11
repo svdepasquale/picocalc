@@ -10,7 +10,7 @@ from pico_utils import paint as _paint, bar as _bar, block_rows as _block_rows, 
 from pico_utils import BCYAN, BYELLOW, GREY, GREEN
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 NTP_HOST = "pool.ntp.org"
 NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
