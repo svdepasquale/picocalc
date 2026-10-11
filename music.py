@@ -540,7 +540,7 @@ def volume(level=None):
 
 def ls():
     for name, path, size in songs():
-        print(name, _format_bytes(size), path)
+        print(name, _format_bytes(size), _clean(path))
 
 
 # ── standard ────────────────────────────────────

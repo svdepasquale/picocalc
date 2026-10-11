@@ -185,7 +185,7 @@ def view(path):
                 gc.collect()
                 lines = text_lines(decode(f.read(VIEW_MAX)))
     except OSError as error:
-        print("Can't read {}: {}".format(path, error))
+        print("Can't read {}: {}".format(_short(path, 40), error))
         _wait_key()
         return False
     except MemoryError:
@@ -238,7 +238,7 @@ def run(path):
     """Run a .py file the way the Apps list does."""
     import apps
 
-    return apps.run_app(path, path.rsplit("/", 1)[-1])
+    return apps.run_app(path, _clean(path.rsplit("/", 1)[-1]))
 
 
 def delete(path, is_dir=False):
@@ -347,7 +347,7 @@ def browse(path="/"):
         try:
             items = entries(folder)
         except OSError as error:
-            print("Can't list {}: {}".format(folder, error))
+            print("Can't list {}: {}".format(_short(folder, 40), error))
             _wait_key()
             if folder == "/":
                 return None

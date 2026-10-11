@@ -101,6 +101,7 @@ def test_safe_csi_guards_the_terminal():
     check("private kept", pu._safe_csi("\x1b[?25l"), "\x1b[?25l")
     check("cut sequence kept", pu._safe_csi("ab\x1b[12"), "ab\x1b[12")
     check("safe row kept", pu._safe_csi("\x1b[3;1Hx"), "\x1b[3;1Hx")
+    check("terminal reset dropped", pu._safe_csi("a\x1bcb"), "ab")
     vt = FakeVt()
     pu._ScreenTerm(vt).write(b"T\x1b[1;99r\x1b[99;1H\n")
     check("writer guarded", vt.drawn, ["T\x1b[{};1H\n".format(last)])

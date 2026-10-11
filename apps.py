@@ -182,7 +182,7 @@ def ls():
     if not found:
         print("No apps in", ", ".join(APP_DIRS))
     for name, category, about, path in found:
-        print(name, "-", about or category or "", "(" + path + ")")
+        print(name, "-", about or category or "", "(" + _clean(path) + ")")
     return len(found)
 
 

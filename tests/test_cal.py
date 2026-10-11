@@ -32,7 +32,9 @@ def test_easter_and_holidays():
         check("easter {}".format(year), cal.easter(year), want)
     days = cal.holidays(2024)
     check("easter monday across a month", days.get((4, 1)), "Luned\xec dell'Angelo")
-    check("twelve days", len(cal.holidays(2026)), 12)
+    check("twelve days before 2026", len(cal.holidays(2025)), 12)
+    check("san francesco from 2026", (len(cal.holidays(2026)), cal.holidays(2027).get((10, 4))), (13, "San Francesco d'Assisi"))
+    check("both names", cal.holidays(2038)[(4, 25)], "Pasqua, Festa della Liberazione")
     check("fixed", (days[(4, 25)], days[(12, 26)]), ("Festa della Liberazione", "Santo Stefano"))
 
 

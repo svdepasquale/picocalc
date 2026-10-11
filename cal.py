@@ -83,16 +83,23 @@ def easter(year):
 
 
 def holidays(year):
-    """{(month, day): name} of the Italian public holidays of a year."""
+    """{(month, day): name} of the Italian public holidays of a year. Two on
+    one day share it ("Pasqua, Festa della Liberazione" in 2038)."""
     out = dict(_FIXED)
+    if year >= 2026:  # Legge 151/2025: national holiday again from 2026
+        out[(10, 4)] = "San Francesco d'Assisi"
     month, day = easter(year)
-    out[(month, day)] = "Pasqua"
+    _add(out, (month, day), "Pasqua")
     if day == days_in_month(year, month):
         month, day = month + 1, 1
     else:
         day += 1
-    out[(month, day)] = "Luned\xec dell'Angelo"
+    _add(out, (month, day), "Luned\xec dell'Angelo")
     return out
+
+
+def _add(days, date, name):
+    days[date] = name + ", " + days[date] if date in days else name
 
 
 def grid(year, month):
@@ -158,8 +165,15 @@ def show():
     """Month view from today; arrows move, t today, q back."""
     today = _today()
     year, month = today[0], today[1]
+    synced = _clock_synced()
     while True:
-        title = "Calendar" if _clock_synced() else "Calendar (clock not set)"
+        if not synced and _clock_synced():
+            # NTP set the clock while the calendar was open (a background
+            # service in the key wait): today was the boot clock's 2021
+            synced = True
+            today = _today()
+            year, month = today[0], today[1]
+        title = "Calendar" if synced else "Calendar (clock not set)"
         _screen_header(title)
         lines = month_lines(year, month, today)
         room = SCREEN_ROWS - len(lines) - 6

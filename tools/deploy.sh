@@ -68,6 +68,12 @@ stale=
 for file in $files; do
   name=$(basename "$file" .py)
   case "$name" in
+    "" | [0-9]* | *[!A-Za-z0-9_]*)
+      echo "not a module name: $file (nothing sent)"
+      exit 1
+      ;;
+  esac
+  case "$name" in
     main | go | default_style) keep=1 ;;
     *) keep=$source_only ;;
   esac

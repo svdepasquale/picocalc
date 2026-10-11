@@ -177,8 +177,12 @@ def clean(text):
 
 def _safe_csi(text):
     # The terminal path's guard, whatever reached print(): no scroll margins
-    # (CSI ... r: only _set_margins sets them, straight to the terminal) and
-    # no cursor row past the last safe one (CSI row;col H/f, CSI row d).
+    # (CSI ... r: only _set_margins sets them, straight to the terminal), no
+    # terminal reset (ESC c: it puts the margins back to all 40 rows) and no
+    # cursor row past the last safe one (CSI row;col H/f, CSI row d; relative
+    # moves stop at the bottom margin in vtterminal.c).
+    if "\x1bc" in text:
+        text = text.replace("\x1bc", "")
     start = text.find("\x1b[")
     if start < 0:
         return text
