@@ -4,13 +4,14 @@ import time
 
 import pico_utils as _pu
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
-from pico_utils import PAGE_LINES, battery as _battery
+from pico_utils import PAGE_LINES, battery as _battery, flash_write as _flash_write
 from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 KEY_LOG = "keylog.txt"
+KEY_LOG_MAX = 16384
 KEY_LOG_BATCH = 20  # keys per write to keylog.txt: one flash write per batch, not per key
 _IMPORT_TICKS = ticks_ms()
 # Backgrounds where black text reads better (the driver's vt100 colours:
@@ -195,10 +196,17 @@ def info(header=True):
 
 def _log_keys(lines):
     # Append the collected lines to keylog.txt in one write, then forget them.
+    # A log past KEY_LOG_MAX starts over: it grew forever on flash.
     if lines:
         try:
-            with open(KEY_LOG, "a") as out:
-                out.write("\n".join(lines) + "\n")
+            with _flash_write(KEY_LOG):
+                try:
+                    if os.stat(KEY_LOG)[6] > KEY_LOG_MAX:
+                        os.remove(KEY_LOG)
+                except OSError:
+                    pass
+                with open(KEY_LOG, "a") as out:
+                    out.write("\n".join(lines) + "\n")
         except OSError:
             pass
         del lines[:]

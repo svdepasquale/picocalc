@@ -1,7 +1,7 @@
 import gc
 import time
 
-from pico_utils import clip as _clip
+from pico_utils import clean as _clean, clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 from pico_utils import http_request as _http_request, net_error as _net_error
 from pico_utils import paint as _paint, GREY, BWHITE, BBLUE, BCYAN, BGREEN, BYELLOW, BRED
@@ -10,7 +10,7 @@ from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -124,7 +124,8 @@ def set_location(lat, lon, name=""):
     config = _load_config()
     config["lat"] = lat_f
     config["lon"] = lon_f
-    config["name"] = _clip(str(name).strip(), 28) if name else ""
+    # cleaned: the name may come from the geocoding service (shown, saved)
+    config["name"] = _clip(_clean(str(name)).strip(), 28) if name else ""
     if not _save_config(config):
         print("Location not saved.")  # after save_json's own error line
         return False
@@ -190,7 +191,7 @@ def set_city(name):
             except Exception:
                 pass
 
-    results = data.get("results")
+    results = data.get("results") if isinstance(data, dict) else None
     if not isinstance(results, list) or not results:
         print("City not found:", _clip(city, 20))
         del data

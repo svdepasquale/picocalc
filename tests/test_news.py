@@ -497,4 +497,13 @@ def test_note_cut_is_said():
         rm_tmp(TMP)
 
 
+
+def test_rss_control_characters_never_shown():
+    # &#27; is ESC: from a feed it could drive the screen terminal to row 40
+    check("entity ESC", rss_news._decode_entities("a&#27;[40;1Hb&#x1B;c"), "a[40;1Hbc")
+    check("entity C1", rss_news._decode_entities("x&#155;y"), "xy")
+    check("entity tab", rss_news._decode_entities("x&#9;y"), "x y")
+    check("raw ESC in a title", rss_news._clean_text("News\x1b[2J now", html=False), "News[2J now")
+    check("raw ESC in a body", rss_news._clean_text("<p>a\x1b[r\x07b</p>"), "a[rb")
+
 run(globals())

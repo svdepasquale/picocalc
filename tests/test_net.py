@@ -618,4 +618,42 @@ def test_wifi_scan_error_in_words():
     check("said in words, retried", got["out"], ["Scan: timed out", "Scan retry", "Scan: timed out"])
 
 
+
+def test_ai_stream_guards():
+    import openrouter_ai as ai
+    saved = (ai._poll_key, ai._ticks_ms)
+    clock = [0]
+    shown = []
+
+    def tick():
+        clock[0] += 60
+        return clock[0]
+
+    try:
+        ai._ticks_ms = tick
+        ai.print = lambda *a, **k: shown.append(" ".join(str(x) for x in a))
+        ai._poll_key = lambda: None
+        body = b'data: {"choices":[{"delta":{"content":"hi \\u001b[40;1H there"}}]}\n\ndata: [DONE]\n'
+        got = []
+        check("ESC dropped", ai._sse_text(ChunkRaw(body), got.append), "hi [40;1H there")
+        keys = [None, "q"]
+        ai._poll_key = lambda: keys.pop(0) if keys else None
+        lines = b"".join(b'data: {"choices":[{"delta":{"content":"w "}}]}\n' for _ in range(20))
+        got = []
+        check("q stops", ai._sse_text(ChunkRaw(lines), got.append), "w ")
+        check("said so", shown[-1].endswith("(stopped)\x1b[0m"), True)
+        ai._poll_key = lambda: None
+        shown[:] = []
+        got = []
+        check("endless line cut", ai._sse_text(ChunkRaw(b"x" * (ai.MAX_LINE_BYTES + 600), 256), got.append), "")
+        check("cut said", shown[-1], "Cut: line too long")
+    finally:
+        ai._poll_key, ai._ticks_ms = saved
+        del ai.print
+
+
+def test_wifi_names_with_controls_left_out():
+    check("ESC name", wifi_manager._decode_ssid(b"Free\x1b[40;1HWiFi"), "")
+    check("normal name", wifi_manager._decode_ssid(b"Casa 5G"), "Casa 5G")
+
 run(globals())

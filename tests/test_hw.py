@@ -823,4 +823,18 @@ def test_status_text_battery():
         pu.refresh_status()
 
 
+
+def test_wav_huge_format_chunk():
+    # a declared "fmt " size of 2 GB: one read that big was attempted
+    import music
+
+    wav = bytearray(_wav_bytes(1, 22050, 16, bytes(16)))
+    wav[16:20] = (0x7FFFFFF0).to_bytes(4, "little")
+    try:
+        music.wav_info(io.BytesIO(bytes(wav)))
+        got = "read"
+    except ValueError as error:
+        got = str(error)
+    check("refused, nothing allocated", got, "no audio data")
+
 run(globals())

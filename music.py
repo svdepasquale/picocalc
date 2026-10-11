@@ -14,6 +14,7 @@ import os
 import sys
 
 from pico_utils import DISPLAY_WIDTH
+from pico_utils import clean as _clean
 from pico_utils import bar as _bar, clear_screen as _clear_screen, clip as _clip
 from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
 from pico_utils import paint as _paint, pick as _pick, poll_key as _poll_key
@@ -23,7 +24,7 @@ from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-07.2"
+MODULE_VERSION = "2026-10-11.1"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 2048  # samples per DMA buffer: 93 ms at 22,050 Hz
 SD_BAUDRATE = 8000000  # while playing: 214 KB/s measured, same data up to 20 MHz
@@ -69,7 +70,11 @@ def wav_info(f):
             raise ValueError("no audio data")
         size = int.from_bytes(chunk[4:8], "little")
         if chunk[0:4] == b"fmt ":
-            body = f.read(size)
+            # at most 40 bytes (WAVE_FORMAT_EXTENSIBLE): a crafted size asked
+            # for one allocation as big as the declared chunk
+            body = f.read(min(size, 40))
+            if size > 40:
+                f.seek(size - 40, 1)
             kind = int.from_bytes(body[0:2], "little")
             channels = int.from_bytes(body[2:4], "little")
             rate = int.from_bytes(body[4:8], "little")
@@ -208,7 +213,7 @@ def songs(dirs=MUSIC_DIRS):
         for name, is_dir, size in items:
             if is_dir or name.startswith(".") or not name.lower().endswith(".wav"):
                 continue
-            found.append((name[:-4], folder.rstrip("/") + "/" + name, size))
+            found.append((_clean(name[:-4]), folder.rstrip("/") + "/" + name, size))
     found.sort(key=lambda song: song[0].lower())
     return found
 

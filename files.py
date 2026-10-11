@@ -13,10 +13,11 @@ from pico_utils import paint as _paint, pick as _pick, read_key as _read_key
 from pico_utils import read_line as _read_line, screen_header as _screen_header
 from pico_utils import wait_key as _wait_key
 from pico_utils import console_resume as _console_resume, console_suspend as _console_suspend
+from pico_utils import clean as _clean, flash_write as _flash_write
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000
@@ -136,7 +137,15 @@ def text_lines(text, width=DISPLAY_WIDTH):
 
 
 def _short(path, limit=30):
+    # shown on screen: a name on the card can hold control characters
+    path = _clean(path)
     return path if len(path) <= limit else ".." + path[-(limit - 2) :]
+
+
+def system_file(path):
+    """True for a file directly in the flash root: the toolkit's modules, its
+    settings and keys, and the files the PicoCalc starts with."""
+    return path[:1] == "/" and path.count("/") == 1 and len(path) > 1 and path != "/sd"
 
 
 # ── actions ─────────────────────────────────────
@@ -245,18 +254,29 @@ def delete(path, is_dir=False):
             print("Folder not empty ({} item{}).".format(count, "" if count == 1 else "s"))
             _wait_key()
             return False
-    print("Delete {}{}? y/n".format(_short(path, 40), "/" if is_dir else ""))
+    if not is_dir and system_file(path):
+        # the toolkit itself, its settings, the power-on hook: a y is too easy
+        print("{} is part of the system.".format(_short(path, 40)))
+        try:
+            answer = _read_line("Delete it? Type yes then Enter: ")
+        except KeyboardInterrupt:
+            answer = None
+        if answer != "yes":
+            return False
+    else:
+        print("Delete {}{}? y/n".format(_short(path, 40), "/" if is_dir else ""))
+        try:
+            key = _read_key()
+        except KeyboardInterrupt:  # Ctrl+C cancels, as n does
+            key = "esc"
+        if key not in ("y", "Y"):
+            return False
     try:
-        key = _read_key()
-    except KeyboardInterrupt:  # Ctrl+C cancels, as n does
-        key = "esc"
-    if key not in ("y", "Y"):
-        return False
-    try:
-        if is_dir:
-            os.rmdir(path)
-        else:
-            os.remove(path)
+        with _flash_write(path):
+            if is_dir:
+                os.rmdir(path)
+            else:
+                os.remove(path)
     except OSError as error:
         print("Can't delete: {}".format(error))
         _wait_key()
@@ -306,7 +326,8 @@ def _new_folder(folder):
     if name is None:
         return None
     try:
-        os.mkdir(join(folder, name))
+        with _flash_write(folder):
+            os.mkdir(join(folder, name))
     except OSError as error:
         print("Can't make it: {}".format(error))
         _wait_key()
@@ -338,7 +359,7 @@ def browse(path="/"):
                 if item[0] == want:
                     pos = i
             want = None
-        labels = [name + "/" if is_dir else name for name, is_dir, size in items]
+        labels = [_clean(name) + "/" if is_dir else _clean(name) for name, is_dir, size in items]
         hints = ["folder" if is_dir else _format_bytes(size) for name, is_dir, size in items]
         key, index = _pick(_short(folder), labels, hints, footer=_FOOTER, pos=pos)
         pos = index or 0

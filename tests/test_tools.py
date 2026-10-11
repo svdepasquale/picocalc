@@ -391,4 +391,15 @@ def test_files_view():
         rm_tree(folder)
 
 
+
+def test_files_system_files_and_names():
+    import files
+
+    check("flash root module", files.system_file("/menu.py"), True)
+    check("flash root config", files.system_file("/settings.json"), True)
+    check("sd file", files.system_file("/sd/a.txt"), False)
+    check("sub folder", files.system_file("/lib/x.py"), False)
+    check("relative", files.system_file("tests/x.py"), False)
+    check("short cleans", files._short("/sd/a\x1b[2Jb"), "/sd/a[2Jb")
+
 run(globals())

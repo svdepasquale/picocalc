@@ -1,7 +1,7 @@
 import gc
 import time
 
-from pico_utils import clip as _clip
+from pico_utils import clean as _clean, clip as _clip
 from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
@@ -32,7 +32,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-11.1"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -171,7 +171,12 @@ def _decode_entities(text):
                         code = int(name[1:])
                 except (ValueError, IndexError):
                     code = 0
-                if 0 < code < 0x110000:
+                if code <= 0:
+                    pass  # not an entity (&#; &#abc; &#0;): kept as written
+                elif code < 32 or 0x7F <= code <= 0x9F:
+                    # a control character (&#27; is ESC): never on screen
+                    rep = " " if code in (9, 10, 13) else ""
+                elif code < 0x110000:
                     rep = chr(code)
         if rep is None:
             out.append("&")
@@ -230,6 +235,9 @@ def _clean_text(text, limit=MAX_SUMMARY_CHARS, html=True):
             # entity-escaped HTML (Atom type="html", many RSS descriptions)
             value = _strip_tags(value)
     value = " ".join(value.split())  # newlines and tabs too
+    # every title and summary passes here: a control character from the feed
+    # (an ESC) would drive the screen terminal
+    value = _clean(value)
     # one character each that the screen draws as three: wrap_text and the
     # limits must count three
     value = value.replace("…", "...").replace("€", "EUR")

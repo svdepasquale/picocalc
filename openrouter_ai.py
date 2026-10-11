@@ -1,7 +1,7 @@
 import gc
 import time
 
-from pico_utils import clip as _clip
+from pico_utils import clean as _clean, clip as _clip, poll_key as _poll_key
 from pico_utils import paged_print as _paged_print
 from pico_utils import paged_lines as _paged_lines
 from pico_utils import preview_print as _preview_print
@@ -31,7 +31,10 @@ MAX_PROMPT_CHARS = 480
 MAX_OUTPUT_CHARS = 1400
 # per read: a non-streamed reply sends nothing until generation ends
 AI_TIMEOUT = 60
-MODULE_VERSION = "2026-10-07.1"
+MAX_LINE_BYTES = 8192  # one streamed line
+MAX_STREAM_MS = 120000  # a reply that streams longer is stopped
+KEY_POLL_MS = 50  # q/Esc while a reply streams
+MODULE_VERSION = "2026-10-11.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -345,23 +348,28 @@ def view(index=1):
 
 def _iter_lines(raw):
     # Lines from a response body read in small chunks (no whole-body buffer).
+    # One line is capped: a body with no newline grew until MemoryError.
     buf = bytearray(256)
-    pending = b""
+    view = memoryview(buf)
+    pending = bytearray()
     while True:
         n = raw.readinto(buf)
         if not n:
             break
-        pending += bytes(buf[:n])
+        pending.extend(view[:n])
         start = 0
         while True:
             nl = pending.find(b"\n", start)
             if nl < 0:
                 break
-            yield pending[start:nl]
+            yield bytes(pending[start:nl])
             start = nl + 1
-        pending = pending[start:]
+        if start:
+            pending = pending[start:]
+        if len(pending) > MAX_LINE_BYTES:
+            raise ValueError("line too long")
     if pending:
-        yield pending
+        yield bytes(pending)
 
 
 def _delta_text(event):
@@ -443,10 +451,24 @@ class _StreamPrinter:
 
 def _sse_text(raw, emit):
     # OpenAI-style server-sent events -> reply text, emitted as it arrives.
+    # q/Esc stops it (the device keyboard's Ctrl+C acts only while stdin is
+    # read), and so does a stream that goes on too long (keep-alives).
     parts = []
     size = 0
+    started = polled = _ticks_ms()
     try:
         for line in _iter_lines(raw):
+            now = _ticks_ms()
+            if _ticks_diff(now, polled) >= KEY_POLL_MS:
+                polled = now
+                if _poll_key() in ("q", "Q", "esc"):
+                    emit("\n")
+                    print(_paint("(stopped)", GREY))
+                    break
+                if _ticks_diff(now, started) > MAX_STREAM_MS:
+                    emit("\n")
+                    print(_paint("(too long: stopped)", GREY))
+                    break
             line = line.strip()
             if not line.startswith(b"data:"):
                 continue  # blank separators and ": keep-alive" comments
@@ -465,6 +487,7 @@ def _sse_text(raw, emit):
                 break
             delta = _delta_text(event)
             if delta:
+                delta = _clean(delta)  # an ESC in a reply would drive the terminal
                 emit(delta)
                 parts.append(delta)
                 size += len(delta)
@@ -573,7 +596,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
             text = _extract_text(body)
             del body
             if text is not None:
-                text = _clip(text, MAX_OUTPUT_CHARS)
+                text = _clip(_clean(text), MAX_OUTPUT_CHARS)
                 _paged_print(text)
     except Exception as error:
         print("Err:", _net_error(error))
