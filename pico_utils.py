@@ -1097,6 +1097,14 @@ def safe_input(prompt):
 
 
 def http_module():
+    # The toolkit's own client (pico_net): it checks TLS where a key goes and
+    # keeps keys and timeouts across redirects; requests is the fallback.
+    try:
+        import pico_net
+
+        return pico_net
+    except ImportError:
+        pass
     try:
         import urequests as requests
     except ImportError:
