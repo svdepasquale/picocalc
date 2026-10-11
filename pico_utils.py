@@ -156,6 +156,60 @@ def _screen_text(buf):
         return "".join(chr(b) if b < 128 else "?" for b in buf)
 
 
+# C0 control characters but tab and newline, and DEL: what clean() drops.
+_CONTROLS = "".join(chr(code) for code in range(32) if code not in (9, 10)) + "\x7f"
+
+
+def clean(text):
+    """Text from outside (feeds, AI answers, network and file names) without
+    control characters. An ESC in it would drive the screen terminal: a
+    cursor sent to row 40, or the scroll margins reset, then a line feed,
+    writes past the framebuffer into the SD driver's buffer (see
+    _set_margins). CR and CR LF become LF."""
+    text = str(text)
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    for ch in _CONTROLS:
+        if ch in text:
+            text = text.replace(ch, "")
+    return text
+
+
+def _safe_csi(text):
+    # The terminal path's guard, whatever reached print(): no scroll margins
+    # (CSI ... r: only _set_margins sets them, straight to the terminal) and
+    # no cursor row past the last safe one (CSI row;col H/f, CSI row d).
+    start = text.find("\x1b[")
+    if start < 0:
+        return text
+    out = []
+    done = 0
+    while start >= 0:
+        end = start + 2
+        while end < len(text) and text[end] in "0123456789;?":
+            end += 1
+        if end >= len(text):
+            break
+        final = text[end]
+        if final in "rHfd":
+            params = text[start + 2 : end]
+            out.append(text[done:start])
+            if final != "r":
+                parts = params.split(";")
+                try:
+                    if int(parts[0] or "1") > _TERM_ROWS - 1:
+                        parts[0] = str(_TERM_ROWS - 1)
+                except ValueError:
+                    parts = ["1"]
+                out.append("\x1b[" + ";".join(parts) + final)
+            done = end + 1
+        start = text.find("\x1b[", end)
+    if not out:
+        return text
+    out.append(text[done:])
+    return "".join(out)
+
+
 class _ScreenTerm(_IOBase):
     # The firmware's vt.write() returns characters, not bytes: on non-ASCII
     # output MicroPython re-sends the tail of the UTF-8 sequence, decode()
@@ -173,7 +227,7 @@ class _ScreenTerm(_IOBase):
         if con is not None and con.draw(buf):
             return len(buf)
         try:
-            self._term.wr(to_cp437(_screen_text(buf)))
+            self._term.wr(to_cp437(_safe_csi(_screen_text(buf))))
         except KeyboardInterrupt:
             _INTERRUPTED[0] = True
         except Exception:
@@ -876,6 +930,85 @@ def browse_items(
             on_key(key, item, pos)
 
 
+# ── panel refresh and flash writes ──────────────
+# Core1 pushes the framebuffer to the panel in a loop, running from flash
+# (XIP), and the driver never lets MicroPython pause it for flash writes: an
+# erase or program can pull the code from under it (a copy hung the device,
+# 2026-10-06). The driver's stopRefresh() holds core1 in reset (0.07 ms) and
+# recoverRefresh() relaunches it (0.11 ms, measured 2026-10-11): the panel
+# keeps its last frame meanwhile.
+
+_HOLDS = [0]  # refresh holds in force: flash writes, the screen switched off
+
+
+def _picocalc(name):
+    mod = sys.modules.get("picocalc")
+    return getattr(mod, name, None) if mod is not None else None
+
+
+def refresh_hold():
+    """Stop the panel refresh until the matching refresh_release(). Nests."""
+    if _HOLDS[0] == 0:
+        display = _picocalc("display")
+        if display is not None:
+            try:
+                display.stopRefresh()
+            except Exception:
+                pass
+    _HOLDS[0] += 1
+
+
+def refresh_release():
+    if _HOLDS[0] <= 0:
+        return
+    _HOLDS[0] -= 1
+    if _HOLDS[0] == 0:
+        display = _picocalc("display")
+        if display is not None:
+            try:
+                display.recoverRefresh()
+            except Exception:
+                pass
+
+
+class _Hold:
+    # `with flash_write(path):` around anything that writes the flash
+    def __init__(self, hold):
+        self.hold = hold
+
+    def __enter__(self):
+        if self.hold:
+            refresh_hold()
+        return self
+
+    def __exit__(self, *exc):
+        if self.hold:
+            refresh_release()
+        return False
+
+
+_HOLD = _Hold(True)
+_NO_HOLD = _Hold(False)
+
+
+def on_sd(path):
+    """True for a path on the SD card (/sd...): SPI, not the flash."""
+    path = str(path)
+    if not path.startswith("/"):
+        try:
+            path = os.getcwd().rstrip("/") + "/" + path
+        except Exception:
+            return False
+    return path == "/sd" or path.startswith("/sd/")
+
+
+def flash_write(path=None):
+    """Context for writing, renaming or deleting files on flash:
+    `with flash_write(path): ...` holds the panel refresh meanwhile (paths
+    on the SD card need no hold). The pye editor's saves are not covered."""
+    return _NO_HOLD if path is not None and on_sd(path) else _HOLD
+
+
 def load_json(filepath):
     for path in (filepath, filepath + ".tmp", filepath + ".bak"):
         try:
@@ -889,6 +1022,13 @@ def load_json(filepath):
 
 
 def save_json(filepath, data):
+    """Write data as JSON through a .tmp file, keeping a .bak until the new
+    file is in place; True on success. Flash writes hold the panel refresh."""
+    with flash_write(filepath):
+        return _save_json(filepath, data)
+
+
+def _save_json(filepath, data):
     tmp = filepath + ".tmp"
     bak = filepath + ".bak"
     try:
@@ -1041,19 +1181,73 @@ def local_time(offset=None):
 # ── device ──────────────────────────────────────
 
 
+# The keyboard MCU (I2C 0x1F) also runs the backlights and the power chip.
+# A register reads back as (register, value); a write sets bit 7 of the
+# register number. Its firmware keeps the backlight values in RAM: lost at
+# power-off, so the launcher restores the saved ones (apply_settings()).
+_REG_BKL = 0x05  # screen backlight: the MCU keeps it to 16-240, step 16
+_REG_BK2 = 0x0A  # keyboard backlight: 0 (off) or 32-224, step 32
+_REG_BAT = 0x0B  # battery percent, bit 7 = charging
+_REG_OFF = 0x0E  # write N: the power chip switches off after max(N, 6) s
+_LCD_STEP = 16
+_KBD_STEP = 32
+
+
+def _mcu_read(reg):
+    # Same sequence as ClockworkPi's C example: write the register, wait 16 ms.
+    kbd = _picocalc("keyboard")
+    kbd.i2c.writeto(kbd.address, bytes((reg,)))
+    sleep_ms(16)
+    return kbd.i2c.readfrom(kbd.address, 2)[1]
+
+
+def _mcu_write(reg, value):
+    kbd = _picocalc("keyboard")
+    kbd.i2c.writeto(kbd.address, bytes((reg | 0x80, value & 0xFF)))
+
+
 def battery():
     # (percent, charging) from the PicoCalc keyboard MCU, or None elsewhere.
-    # Same sequence as ClockworkPi's C example: write reg 0x0B, wait 16 ms.
     try:
-        import picocalc
-
-        kbd = picocalc.keyboard
-        kbd.i2c.writeto(kbd.address, b"\x0b")
-        sleep_ms(16)
-        data = kbd.i2c.readfrom(kbd.address, 2)
-        return data[1] & 0x7F, bool(data[1] & 0x80)
+        value = _mcu_read(_REG_BAT)
+        return value & 0x7F, bool(value & 0x80)
     except Exception:
         return None
+
+
+def backlight(level=None):
+    """Screen backlight, level 1-15 (the MCU's 16-240). Sets it when given;
+    returns the level, None without the PicoCalc keyboard MCU."""
+    try:
+        if level is not None:
+            level = max(1, min(15, int(level)))
+            _mcu_write(_REG_BKL, level * _LCD_STEP)
+            return level
+        return max(1, _mcu_read(_REG_BKL) // _LCD_STEP)
+    except Exception:
+        return None
+
+
+def keyboard_light(level=None):
+    """Keyboard backlight, level 0 (off) to 7 (the MCU's 32-224)."""
+    try:
+        if level is not None:
+            level = max(0, min(7, int(level)))
+            _mcu_write(_REG_BK2, level * _KBD_STEP)
+            return level
+        return _mcu_read(_REG_BK2) // _KBD_STEP
+    except Exception:
+        return None
+
+
+def power_off(delay_s=6):
+    """Ask the keyboard MCU to switch the PicoCalc off in delay_s seconds (6
+    at least). A Pico powered over its own USB cable stays on. True if asked."""
+    try:
+        _mcu_write(_REG_OFF, max(6, min(60, int(delay_s))))
+        return True
+    except Exception:
+        return False
 
 
 def wifi_connected():
