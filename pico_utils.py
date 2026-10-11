@@ -647,6 +647,7 @@ def _poll_byte():
         except Exception:  # keyboard MCU unpowered or busy, firmware bugs
             pass
         if poll and poll.poll(0):
+            screen_on()  # the REPL that follows needs a screen
             raise HostTakeover
         return None
     if poll and poll.poll(0):
@@ -662,14 +663,22 @@ def _poll_byte():
 
 
 def _key_byte(timeout_ms=None):
+    # Every key read waits here, so the idle work runs here too: dimming,
+    # switching the screen off, background services (_services).
     start = ticks_ms()
     while True:
         byte = _poll_byte()
+        now = ticks_ms()
         if byte is not None:
-            return byte
-        if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
+            if _awake(byte, now):
+                return byte
+            continue  # that key only woke the screen, or switched it off
+        if ticks_diff(now, _IDLE[1]) >= SERVICE_MS:
+            _IDLE[1] = now
+            _services(now, timeout_ms != 0)
+        if timeout_ms is not None and ticks_diff(now, start) >= timeout_ms:
             return None
-        sleep_ms(10)
+        sleep_ms(OFF_POLL_MS if _OFF[0] is not None else 10)
 
 
 def _decode_key(first, next_byte):
@@ -1257,6 +1266,241 @@ def wifi_connected():
         return network.WLAN(network.STA_IF).isconnected()
     except Exception:
         return False
+
+
+# ── settings ────────────────────────────────────
+
+SETTINGS_FILE = "settings.json"
+WIFI_CREDENTIALS_FILE = "wifi_credentials.json"
+SETTINGS_DEFAULTS = {
+    "brightness": 0,  # screen backlight 1-15, set at start; 0: as it is
+    "keyboard": -1,  # keyboard light 0-7, set at start; -1: as it is
+    "dim_s": 60,  # idle seconds before the screen dims; 0: never
+    "sleep_s": 300,  # idle seconds before the screen goes off; 0: never
+    "wifi_sleep": True,  # Wi-Fi off after a minute of screen off in a key wait
+    "autoconnect": True,  # the launcher joins a saved network at start
+}
+_SETTINGS = [None]
+
+
+def settings():
+    """The settings, defaults where settings.json lacks a value or has one of
+    the wrong type. Keys it doesn't know (other apps') are kept."""
+    if _SETTINGS[0] is None:
+        merged = dict(SETTINGS_DEFAULTS)
+        data = load_json(SETTINGS_FILE)
+        if isinstance(data, dict):
+            for name, value in data.items():
+                default = SETTINGS_DEFAULTS.get(name)
+                if default is None or type(value) is type(default):
+                    merged[name] = value
+        _SETTINGS[0] = merged
+    return _SETTINGS[0]
+
+
+def set_setting(name, value):
+    """Change one setting and save them all; True if saved."""
+    current = settings()
+    current[name] = value
+    return save_json(SETTINGS_FILE, current)
+
+
+def apply_settings():
+    """At launcher start: the saved backlights (the keyboard MCU forgets
+    them at power-off)."""
+    current = settings()
+    if current["brightness"] > 0:
+        backlight(current["brightness"])
+    if current["keyboard"] >= 0:
+        keyboard_light(current["keyboard"])
+
+
+# ── idle: dimming, the screen off, services ─────
+# Key waits go through _key_byte(): it runs _services() about four times a
+# second (also on polls, waiting=False) and _awake() on every key byte.
+# Idle time counts from the last key.
+
+SERVICE_MS = 250
+OFF_POLL_MS = 100  # key poll period while the screen is off
+DIM_LEVEL = 1  # backlight while dimmed
+WIFI_SLEEP_MS = 60000  # screen off this long in a key wait: Wi-Fi off too
+POWER_KEY = 0x91  # the keyboard MCU's code for a short press of the power button
+
+_IDLE = [ticks_ms(), 0]  # ticks of the last key, of the last services run
+_DIM = [None]  # the backlight level to go back to, while dimmed
+_OFF = [None]  # screen off: [palette, backlight, keyboard light, since, held, network]
+_HOOKS = []  # background services
+_BLACK = bytearray(64)  # 32 palette entries of black
+
+
+def add_service(fn):
+    """Run fn(now, waiting) in key waits, about four times a second (waiting
+    False: an app polling keys between its own work). Returning False, or
+    raising, removes it. Keep it short: the keyboard waits meanwhile."""
+    if fn not in _HOOKS:
+        _HOOKS.append(fn)
+
+
+def remove_service(fn):
+    if fn in _HOOKS:
+        _HOOKS.remove(fn)
+
+
+def _services(now, waiting):
+    current = settings()
+    idle = ticks_diff(now, _IDLE[0])
+    off = _OFF[0]
+    if off is None:
+        if current["sleep_s"] > 0 and idle >= current["sleep_s"] * 1000:
+            screen_off()
+        elif _DIM[0] is None and current["dim_s"] > 0 and idle >= current["dim_s"] * 1000:
+            _dim()
+    else:
+        since = ticks_diff(now, off[3])
+        if not off[4] and since >= 150:
+            refresh_hold()  # a whole black frame has reached the panel (~45 ms each)
+            off[4] = True
+        if waiting and off[5] is None and current["wifi_sleep"] and since >= WIFI_SLEEP_MS:
+            off[5] = _wifi_sleep()
+    for fn in list(_HOOKS):
+        try:
+            keep = fn(now, waiting)
+        except Exception:
+            keep = False
+        if keep is False:
+            remove_service(fn)
+
+
+def _awake(byte, now):
+    # A key byte came. True: pass it on. False: it only woke the screen (the
+    # rest of its sequence goes too), or it was the power button.
+    _IDLE[0] = now
+    if _OFF[0] is not None:
+        screen_on()
+        _drain()
+        return False
+    if byte == POWER_KEY:
+        screen_off()
+        return False
+    if _DIM[0] is not None:
+        _undim()
+    return True
+
+
+def _drain():
+    # What is left of the key that woke the screen (an arrow is three bytes).
+    quiet = ticks_ms()
+    while ticks_diff(ticks_ms(), quiet) < _ESC_WAIT_MS:
+        if _poll_byte() is None:
+            sleep_ms(5)
+        else:
+            quiet = ticks_ms()
+
+
+def _dim():
+    level = backlight()
+    if level is not None and level > DIM_LEVEL:
+        _DIM[0] = level
+        backlight(DIM_LEVEL)
+
+
+def _undim():
+    level = _DIM[0]
+    _DIM[0] = None
+    if level is not None:
+        backlight(level)
+
+
+def screen_off():
+    """Switch the screen off: a black palette (the picture stays in the
+    framebuffer), the backlight at its minimum (the MCU never goes lower),
+    the keyboard light off, then the panel refresh held. Apps go on: music
+    keeps playing. Any key switches it back on and does nothing else."""
+    if _OFF[0] is not None:
+        return
+    level = _DIM[0] if _DIM[0] is not None else backlight()
+    _DIM[0] = None
+    keys = keyboard_light()
+    palette = None
+    try:
+        import picocalcdisplay
+
+        palette = bytearray(bytes(picocalcdisplay.getLUTview())[:64])
+        # Firmware bug: setLUT() copies twice its buffer's length in bytes (a
+        # whole 256-entry table writes 512 bytes past the LUT). 32 bytes of a
+        # 64-byte buffer: its 64 bytes are copied, palette entries 0-31.
+        picocalcdisplay.setLUT(memoryview(_BLACK)[:32])
+    except Exception:
+        palette = None
+    if level is not None:
+        backlight(DIM_LEVEL)
+    if keys:
+        keyboard_light(0)
+    _OFF[0] = [palette, level, keys, ticks_ms(), False, None]
+
+
+def screen_on():
+    """Back from screen_off() or from dimming; nothing if the screen is on."""
+    off = _OFF[0]
+    if off is None:
+        if _DIM[0] is not None:
+            _undim()
+        return
+    _OFF[0] = None
+    if off[0] is not None:
+        try:
+            import picocalcdisplay
+
+            picocalcdisplay.setLUT(memoryview(off[0])[:32])
+        except Exception:
+            pass
+    if off[4]:
+        refresh_release()
+    if off[1] is not None:
+        backlight(off[1])
+    if off[2]:
+        keyboard_light(off[2])
+    if off[5]:
+        _wifi_wake(off[5])
+    _IDLE[0] = ticks_ms()
+
+
+def screen_is_off():
+    return _OFF[0] is not None
+
+
+def _wifi_sleep():
+    # Wi-Fi off for a long screen-off wait: the network to rejoin, or False.
+    try:
+        import network
+
+        wlan = network.WLAN(network.STA_IF)
+        if not wlan.isconnected():
+            return False
+        ssid = wlan.config("ssid")
+        wlan.disconnect()
+        wlan.active(False)
+        refresh_status()
+        return ssid or False
+    except Exception:
+        return False
+
+
+def _wifi_wake(ssid):
+    # Rejoin in the background: connect() returns at once and the radio
+    # joins while the apps go on (the title bar says WiFi once it has).
+    try:
+        import network
+
+        password = (load_json(WIFI_CREDENTIALS_FILE) or {}).get(ssid)
+        if password is None:
+            return
+        wlan = network.WLAN(network.STA_IF)
+        wlan.active(True)
+        wlan.connect(ssid, password)
+        refresh_status()
+    except Exception:
+        pass
 
 
 def check_wifi():

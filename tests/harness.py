@@ -4,6 +4,7 @@
 #   test_news.py    rss_news, Miniflux, notes
 #   test_tools.py   files, apps, scientific_calc
 #   test_hw.py      music, synthesizer, snake, clock_ntp, sys_status
+#   test_os.py      pico_utils' OS layer: settings, flash writes, power, idle
 # Run one from the repo root with either interpreter:
 #   python3 tests/test_core.py
 #   micropython tests/test_core.py
