@@ -10,8 +10,9 @@
 # on import, so the device's copy of the other kind is removed.
 # The panel refresh runs on core1 from code in flash while files are written,
 # and the driver never lets MicroPython pause core1 for flash writes: a copy
-# hung the device once (2026-10-06). So the refresh stops first, and the
-# reset afterwards brings everything back.
+# hung the device once (2026-10-06). So the refresh stops first (at a safe
+# point of core1's loop, see below), and the reset afterwards brings
+# everything back.
 #   tools/deploy.sh [file.py ...]        (default: every .py in the repo root)
 #   tools/deploy.sh --py [file.py ...]   sources only, no mpy-cross
 #   PICOCALC_PORT=/dev/cu.usbmodem... tools/deploy.sh   (default: mpremote picks)
@@ -88,7 +89,21 @@ for file in $files; do
   fi
 done
 
-mp exec "import picocalc; picocalc.display.stopRefresh()"
+# Stop the refresh while core1 pushes a frame (the panel's DMA busy): reset
+# during its sleep between frames it can keep the pico-sdk alarm pool's spin
+# lock, and core0 then hangs for good on it (pico_utils._stop_refresh).
+mp exec "
+import picocalc
+from machine import mem32
+ctrl = 0
+for ch in range(16):
+    if mem32[0x50000004 + ch * 64] == 0x40088008:
+        ctrl = 0x5000000C + ch * 64
+n = 0
+while ctrl and not mem32[ctrl] & 0x04000000 and n < 20000:
+    n += 1
+picocalc.display.stopRefresh()
+"
 # shellcheck disable=SC2086
 mp cp $sent :
 mp exec "

@@ -962,11 +962,49 @@ def browse_items(
 # keeps its last frame meanwhile.
 
 _HOLDS = [0]  # refresh holds in force: flash writes, the screen switched off
+_DMA_BASE = 0x50000000  # RP2350: 16 channels, 0x40 apart
+_DMA_BUSY = 0x04000000  # CTRL_TRIG.BUSY
+_PANEL_DR = 0x40088008  # SPI1's data register: where the panel's DMA writes
+_PANEL_DMA = [None]  # the CTRL_TRIG address of the panel's DMA channel, 0: none
 
 
 def _picocalc(name):
     mod = sys.modules.get("picocalc")
     return getattr(mod, name, None) if mod is not None else None
+
+
+def _panel_dma():
+    if _PANEL_DMA[0] is None:
+        _PANEL_DMA[0] = 0
+        if sys.platform == "rp2":  # mem32 elsewhere is the process's memory
+            try:
+                from machine import mem32
+
+                for channel in range(16):
+                    base = _DMA_BASE + channel * 0x40
+                    if mem32[base + 4] == _PANEL_DR:
+                        _PANEL_DMA[0] = base + 0x0C
+                        break
+            except Exception:
+                pass
+    return _PANEL_DMA[0]
+
+
+def _stop_refresh(display):
+    # Core1 sleeps 5 ms between frames through the pico-sdk alarm pool, whose
+    # spin lock MicroPython's core0 takes too (every key wait): reset inside
+    # it, core1 leaves the lock taken and core0 spins on it forever with
+    # interrupts off, USB dead (the hang of 2026-10-11, many saves into a
+    # test run). So core1 is reset while it pushes a frame (the panel's DMA
+    # busy: ~45 ms of every ~50), where it takes no lock.
+    ctrl = _panel_dma()
+    if ctrl:
+        from machine import mem32
+
+        start = ticks_ms()
+        while not mem32[ctrl] & _DMA_BUSY and ticks_diff(ticks_ms(), start) < 100:
+            pass
+    display.stopRefresh()
 
 
 def refresh_hold():
@@ -975,7 +1013,7 @@ def refresh_hold():
         display = _picocalc("display")
         if display is not None:
             try:
-                display.stopRefresh()
+                _stop_refresh(display)
             except Exception:
                 pass
     _HOLDS[0] += 1
