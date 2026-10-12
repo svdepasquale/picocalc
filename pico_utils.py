@@ -1430,6 +1430,14 @@ def remove_service(fn):
         _HOOKS.remove(fn)
 
 
+def speakers_busy():
+    """True while the music plays in the background: its DMA owns the
+    speakers' PWM slice, and a tone set up there (a game's blip, a beep)
+    silenced it for the rest of the track."""
+    music = sys.modules.get("music")
+    return music is not None and music.playing() is not None
+
+
 def background_work():
     """What key waits run besides the keys: the services and the tick."""
     work = list(_HOOKS)

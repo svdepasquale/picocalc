@@ -93,6 +93,45 @@ def test_synth_ctrl_c_stops_the_tune():
         del synth.print
 
 
+class _PlayingMusic:
+    # the music module while a track plays in the background
+    def playing(self):
+        return "a"
+
+
+def test_tones_leave_background_music_alone():
+    # The music's DMA owns the speakers' PWM slice: a blip or a beep set up
+    # there silenced the track for the rest of it, the ► mark still shown
+    import snake
+
+    def interrupted(ms):
+        raise KeyboardInterrupt
+
+    saved = (sys.modules.get("machine"), sys.modules.get("music"), snake._sleep_ms)
+    sys.modules["machine"] = _RecMachine
+    del _RecPWM.log[:]
+    try:
+        sys.modules["music"] = _PlayingMusic()
+        check("no beep over the music", (synth._play_freq_pwm(880, 10), synth.beep(2, ms=1)), (False, True))
+        snake._blip()
+        check("nor a blip: the slice untouched", _RecPWM.log, [])
+        sys.modules.pop("music")
+        snake._sleep_ms = interrupted
+        try:
+            snake._blip()
+            check("Ctrl+C in a blip reaches the game", "returned", "KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        check("blip silenced and released anyway", _RecPWM.log[-2:], [("duty", 26, 0), ("deinit", 26)])
+    finally:
+        for name, module in (("machine", saved[0]), ("music", saved[1])):
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+        snake._sleep_ms = saved[2]
+
+
 # snake
 
 

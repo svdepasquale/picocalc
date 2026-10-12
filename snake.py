@@ -7,12 +7,13 @@ from pico_utils import DISPLAY_WIDTH, PAGE_LINES
 from pico_utils import clear_screen as _clear_screen, load_json as _load_json
 from pico_utils import paint as _paint, poll_key as _poll_key, read_key as _read_key
 from pico_utils import save_json as _save_json, sleep_ms as _sleep_ms
+from pico_utils import speakers_busy as _speakers_busy
 from pico_utils import ticks_add as _ticks_add, ticks_diff as _ticks_diff
 from pico_utils import ticks_ms as _ticks_ms, title_bar as _title_bar
 from pico_utils import BGREEN, BRED, BYELLOW, GREEN, GREY
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-12.1"
 CONFIG_FILE = "snake.json"
 START_MS = 150  # time per step at the start
 FASTEST_MS = 60
@@ -154,15 +155,22 @@ def _draw_board(state, best, sound):
 
 
 def _blip():
+    # Not over the music in the background: setting the slice up for the
+    # blip silenced the track. Silent and released whatever happens (a
+    # Ctrl+C from USB in the sleep left the tone on).
+    if _speakers_busy():
+        return
     try:
         from machine import PWM, Pin
 
         pwm = PWM(Pin(SPEAKER_PIN))
-        pwm.freq(1320)
-        pwm.duty_u16(8000)
-        _sleep_ms(15)
-        pwm.duty_u16(0)
-        pwm.deinit()
+        try:
+            pwm.freq(1320)
+            pwm.duty_u16(8000)
+            _sleep_ms(15)
+        finally:
+            pwm.duty_u16(0)
+            pwm.deinit()
     except Exception:
         pass
 

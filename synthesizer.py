@@ -11,11 +11,13 @@ from pico_utils import (
     sleep_ms as _sleep_ms,
     read_key as _read_key,
     poll_key as _poll_key,
+    speakers_busy as _speakers_busy,
+    wait_key as _wait_key,
     DISPLAY_WIDTH,
 )
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-12.1"
 
 # ── audio ───────────────────────────────────────
 SAMPLE_RATE = 22050
@@ -215,7 +217,10 @@ def _play_freq_i2s(freq, dur_ms):
 
 
 def _play_freq_pwm(freq, dur_ms):
-    """Play a square-wave tone via PWM (PicoCalc built-in speakers)."""
+    """Play a square-wave tone via PWM (PicoCalc built-in speakers). Not
+    while the music plays in the background: its slice, its sound."""
+    if _speakers_busy():
+        return False
     try:
         from machine import PWM, Pin
         pwms = [PWM(Pin(p)) for p in _pwm_pins]
@@ -519,6 +524,12 @@ def piano():
             print("Out:{} +/-oct 1-4wave".format(out))
         print("q/Esc=quit r=redraw")
 
+    if _use_pwm and _speakers_busy():
+        _screen_header("~~ Synthesizer ~~")
+        print("Music is playing in the background on the")
+        print("speakers: stop it in Music (q), then play.")
+        _wait_key()
+        return
     _show_piano()
     try:
         while True:
