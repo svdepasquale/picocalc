@@ -272,7 +272,7 @@ def tone(freq, ms=None):
     if freq < 20 or freq > 20000:
         print("Range: 20-20000 Hz")
         return False
-    print("{}Hz {}ms [{}]".format(int(freq), ms, _wave))
+    print("{}Hz {}ms [{}]".format(int(freq), ms, "square" if _use_pwm else _wave))  # PWM: square only
     return _play_freq(freq, ms)
 
 

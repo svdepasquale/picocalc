@@ -77,10 +77,16 @@ def discover(dirs=APP_DIRS):
 
 
 def _print_error(error):
+    # The traceback names the app's file and carries its message: printed
+    # through clean(), like any text from the SD card.
     try:
-        sys.print_exception(error)
+        import io
+
+        out = io.StringIO()
+        sys.print_exception(error, out)
+        print(_clean(out.getvalue()), end="")
     except AttributeError:  # CPython
-        print("{}: {}".format(type(error).__name__, error))
+        print(_clean("{}: {}".format(type(error).__name__, error)))
 
 
 def _compile(path):

@@ -53,6 +53,12 @@ def test_calc_huge_ints():
         check("negative too", sc._format_result(-big), "too large to show")
         check("170! still shown", sc._format_result(sc._calc_factorial(170), 12), "7.257416e306")
         check("2^1000 still shown", sc._format_result(2 ** 1000, 12), "1.071509e301")
+        check("a carry to e10 still fits", [len(sc._fit_int(v, w)) for v, w in ((-(10**10 - 1), 10), (10**100 - 1, 50))], [10, 50])
+        try:
+            sc._calc_factorial(2.5)
+            check("2.5! refused", "2", "ValueError")
+        except ValueError:
+            pass
         del sc._HISTORY[:]
         sc._store("10**1000", big)
         check("ans keeps it", sc._LAST == big, True)
@@ -192,6 +198,20 @@ def test_app_discover_and_run():
         if hasattr(pu, "_APP_RAN"):
             del pu._APP_RAN
         rm_tree(folder)
+
+
+def test_app_error_printed_clean():
+    # an app's traceback names its file and carries its message: both are
+    # text from the SD card, so no escape reaches the screen
+    import apps
+
+    out = []
+    saved = swap(apps, {"print": lambda *args, **kw: out.append(" ".join(str(a) for a in args))})
+    try:
+        apps._print_error(ValueError("\x1b[40;1H\x1bc boom"))
+    finally:
+        unswap(apps, saved)
+    check("cleaned", ("\x1b" in "".join(out), "boom" in "".join(out)), (False, True))
 
 
 def test_app_puts_back_cwd_and_console():

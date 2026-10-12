@@ -5,11 +5,11 @@ import time
 import pico_utils as _pu
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
 from pico_utils import PAGE_LINES, battery as _battery, sort_by as _sort_by
-from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
-from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
+from pico_utils import paint as _paint, bar as _bar, clean as _clean
+from pico_utils import GREEN, YELLOW, RED, GREY, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 KEY_LOG = "keylog.txt"
 KEY_LOG_MAX = 16384
 KEY_LOG_BATCH = 20  # keys per write to keylog.txt: one flash write per batch, not per key
@@ -110,12 +110,12 @@ def ls(path="/"):
             try:
                 st = os.stat(full)
                 if st[0] & 0x4000:
-                    lines.append("  {}/".format(name))
+                    lines.append("  {}/".format(_clean(name)))
                 else:
-                    lines.append("  {} {}".format(name, format_bytes(st[6])))
+                    lines.append("  {} {}".format(_clean(name), format_bytes(st[6])))
             except Exception:
-                lines.append("  {}".format(name))
-        print("Dir:", path)
+                lines.append("  {}".format(_clean(name)))
+        print("Dir:", _clean(path))  # names on the card are anyone's
         paged_lines(lines, page_lines=PAGE_LINES)
         return len(items)
     except Exception as e:
