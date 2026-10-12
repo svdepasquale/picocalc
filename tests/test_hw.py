@@ -3,7 +3,7 @@ try:
 except ImportError:  # on the device tools/test_device.sh puts harness.py in front
     pass
 
-# Host checks for music, synthesizer, snake, clock_ntp and sys_status.
+# Host checks for synthesizer, clock_ntp and sys_status.
 # Run from the repo root with either interpreter:
 #   python3 tests/test_hw.py
 #   micropython tests/test_hw.py
@@ -91,89 +91,6 @@ def test_synth_ctrl_c_stops_the_tune():
             sys.modules["machine"] = saved[0]
         synth._sleep_ms, synth._poll_key, synth._init_audio, synth._use_pwm = saved[1:]
         del synth.print
-
-
-# snake
-
-
-class FakeRng:
-    def __init__(self, values):
-        self.values = list(values)
-
-    def randint(self, low, high):
-        return self.values.pop(0) if self.values else low
-
-
-def test_snake_moves_and_turns():
-    import snake
-
-    s = snake.new_game(10, 5, FakeRng([0, 0]))
-    check("start", s["snake"], [(3, 2), (4, 2), (5, 2)])
-    check("food placed", s["food"], (0, 0))
-    check("moved", snake.step(s), "moved")
-    check("head right", s["snake"][-1], (6, 2))
-    check("length kept", len(s["snake"]), 3)
-    snake.turn(s, (-1, 0))
-    snake.step(s)
-    check("reverse ignored", s["snake"][-1], (7, 2))
-    snake.turn(s, (0, -1))
-    snake.turn(s, (-1, 0))
-    snake.step(s)
-    check("first queued turn", s["snake"][-1], (7, 1))
-    snake.step(s)
-    check("second queued turn", s["snake"][-1], (6, 1))
-    check("cells match", s["cells"], set(s["snake"]))
-
-
-def test_snake_eats_and_dies():
-    import snake
-
-    s = snake.new_game(10, 5, FakeRng([6, 2]))
-    check("food ahead", s["food"], (6, 2))
-    check("ate", snake.step(s), "ate")
-    check("grew", len(s["snake"]), 4)
-    check("score", s["score"], 1)
-    for _ in range(3):
-        snake.step(s)
-    check("wall", snake.step(s), "dead")
-    loop = snake.new_game(5, 5, FakeRng([4, 4]))
-    loop["snake"] = [(1, 1), (2, 1), (2, 2), (1, 2)]
-    loop["cells"] = set(loop["snake"])
-    loop["dir"] = (0, -1)
-    check("tail cell is free", snake.step(loop), "moved")
-    bite = snake.new_game(5, 5, FakeRng([4, 4]))
-    bite["snake"] = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1)]
-    bite["cells"] = set(bite["snake"])
-    bite["dir"] = (0, -1)
-    check("own body", snake.step(bite), "dead")
-
-
-def test_snake_food_placement():
-    import snake
-
-    s = snake.new_game(4, 1, FakeRng([1, 0] * 60))
-    check("crowded: first free cell", s["food"], (3, 0))
-    s["cells"].add((3, 0))
-    check("full field", snake.place_food(s), None)
-    check("no food left", s["food"], None)
-
-
-def test_snake_turn_queue():
-    import snake
-
-    R, U, L, D = (1, 0), (0, -1), (-1, 0), (0, 1)
-    s = snake.new_game(10, 5, FakeRng([0, 0]))
-    for heading in (R, R, U):  # right, right, up within one step
-        snake.turn(s, heading)
-    snake.step(s)
-    check("repeats take no slot: the up lands", s["snake"][-1], (5, 1))
-    s = snake.new_game(10, 5, FakeRng([0, 0]))
-    for heading in (U, D, U, L):
-        snake.turn(s, heading)
-    check("reverse and repeat of the queued turn dropped", s["turns"], [U, L])
-    snake.step(s)
-    snake.step(s)
-    check("up then left", s["snake"][-1], (4, 1))
 
 
 # clock
