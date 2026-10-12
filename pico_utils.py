@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -442,6 +442,13 @@ _STATUS = [None, 0, False, None]  # read at, UTC offset, Wi-Fi up, battery
 
 
 _STATUS_VER = [0]
+_EXTRA = [""]  # a mark the title bar shows first (the music playing: a note)
+
+
+def set_status_extra(text):
+    """Show `text` first in the title bar's status ("" for nothing)."""
+    _EXTRA[0] = text or ""
+    refresh_status()
 
 
 def refresh_status():
@@ -467,7 +474,7 @@ def status_text():
         _STATUS[1] = utc_offset_hours()
         _STATUS[2] = wifi_connected()
         _STATUS[3] = battery()
-    parts = []
+    parts = [_EXTRA[0]] if _EXTRA[0] else []
     if clock_synced():
         t = local_time(_STATUS[1])
         parts.append("{:02d}:{:02d}".format(t[3], t[4]))
@@ -717,6 +724,8 @@ def _key_byte(timeout_ms=None):
     start = ticks_ms()
     while True:
         byte = _poll_byte()
+        if byte is None and _TICK[0] is not None:
+            _TICK[0]()  # the music in the background: its buffers, a step
         now = ticks_ms()
         if byte is not None:
             if _awake(byte, now):
@@ -1314,6 +1323,14 @@ def apply_settings():
 # Idle time counts from the last key.
 
 SERVICE_MS = 250
+_TICK = [None]  # run on every pass of a key wait and on every poll
+
+
+def set_tick(fn):
+    """fn() on every pass of a key wait (~10 ms) and on every poll; None
+    removes it. For work that cannot wait SERVICE_MS: the music in the
+    background. It must not raise, and must be short."""
+    _TICK[0] = fn
 OFF_POLL_MS = 100  # key poll period while the screen is off
 DIM_LEVEL = 1  # backlight while dimmed
 WIFI_SLEEP_MS = 60000  # screen off this long in a key wait: Wi-Fi off too

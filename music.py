@@ -21,12 +21,14 @@ from pico_utils import paint as _paint, pick as _pick, poll_key as _poll_key
 from pico_utils import screen_header as _screen_header, sleep_ms as _sleep_ms
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import title_bar as _title_bar, wait_key as _wait_key
+from pico_utils import set_status_extra as _set_status_extra, set_tick as _set_tick
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 MUSIC_DIRS = ("/sd/music", "/sd")
-FRAMES = 2048  # samples per DMA buffer: 93 ms at 22,050 Hz
+FRAMES = 4096  # samples per DMA buffer: 186 ms at 22,050 Hz
+STEP = 1024  # samples read and converted per pump step
 SD_BAUDRATE = 8000000  # while playing: 214 KB/s measured, same data up to 20 MHz
 SD_DEFAULT_BAUDRATE = 1320000  # the firmware's sdcard driver default, restored after
 MAX_BYTES_PER_S = 140000  # what the SD keeps up with next to the screen
@@ -312,7 +314,7 @@ def _draw(name, info, total_s):
     print(
         "  ".join(
             _paint(k, BYELLOW) + " " + v
-            for k, v in (("Space", "pause"), ("←→", "track"), ("+/-", "volume"), ("q", "stop"))
+            for k, v in (("Space", "pause"), ("←→", "track"), ("+/-", "vol"), ("b", "background"), ("q", "stop"))
         ),
         end="",
     )
@@ -330,195 +332,387 @@ def _status(played_s, total_s, paused, under):
     print(line, end="")
 
 
-def play_file(path, name=None):
-    """Play one WAV file. Returns "end", "next", "prev" or "quit".
-    Space pauses, +/- volume, left/right track, q stops."""
-    global _volume
-    import rp2
-    from array import array
-    from machine import mem32
+# ── the engine ──────────────────────────────────
+# Two buffers of FRAMES samples, two DMA channels paced by slice 11. A channel
+# chains to the other only once that buffer is full (arm()): when the SD falls
+# behind, the sound stops for a moment instead of replaying old samples, and
+# a track's last chunk always plays (it went unplayed when the SD was late at
+# the end). Buffers fill STEP samples at a time from pump(): the player's own
+# loop runs it, and in the background every key wait does (pico_utils tick),
+# so the SD is never read in the middle of another app's SD access.
 
-    f = open(path, "rb")
-    try:
-        channels, rate, bits, offset, size = wav_info(f)
-    except Exception:
-        f.close()
-        raise
-    frame_bytes = channels * bits // 8
-    total = size // frame_bytes
-    total_s = total / rate
-    raw = bufs = mv = None  # allocated in the try: a MemoryError closes the file
-    sd = _sd_card()
-    ch = []
-    free = []
-    ready = [1, 1]  # buffer k holds samples from the file not played yet
-    stats = [0, 0, -1]  # frames played, gaps, last channel (-1: not yet known)
-    counts = [0, 0]
-    result = "end"
-    pins = None
-    started = _ticks_ms()
+FREE, FILLING, FULL, PLAYING = 0, 1, 2, 3
 
-    def fill(k, left):
-        want = min(FRAMES, left)
-        got = f.readinto(mv[: want * frame_bytes]) or 0
-        n = got // frame_bytes
-        if n:
-            convert(raw, bufs[k], n, channels, bits, _volume)
-        counts[k] = n
-        ready[k] = 1
-        return n
 
-    def done(dma):
-        # Buffer k finished and the DMA chained into the other. Only frames
-        # read from the file count as played: when the SD falls behind, the
-        # DMA replays a buffer not refilled yet, which moves nothing on.
-        k = 0 if dma is ch[0] else 1
-        dma.read = bufs[k]  # READ_ADDR isn't reloaded on a chain trigger
-        fresh = ready[k]
-        ready[k] = 0
-        stats[0] += counts[k] * fresh
-        if k == stats[2]:
-            free.append(-1)  # the last buffer finished
+class Player:
+    def __init__(self, path, name=None):
+        self.path = path
+        self.name = name or path.rsplit("/", 1)[-1]
+        f = open(path, "rb")
+        try:
+            self.channels, self.rate, self.bits, self.offset, size = wav_info(f)
+        except Exception:
+            f.close()
+            raise
+        self.f = f
+        self.frame_bytes = self.channels * self.bits // 8
+        self.total = size // self.frame_bytes
+        self.left = self.total  # frames not read yet
+        self.played = 0
+        self.gaps = 0  # dropouts: the SD later than the sound
+        self.paused = False
+        self.ended = False
+        self.ch = []
+        self.bufs = self.raw = self.mv = None
+        self.count = [0, 0]  # frames in each buffer
+        self.state = [FREE, FREE]
+        self.filling = None  # the buffer a fill is under way in
+        self.last = -1  # the buffer holding the end of the file
+        self.done_q = []  # buffers the DMA finished (IRQ), in order
+        self.pins = None
+        self.sd = _sd_card()
+        self.started = self.progress = _ticks_ms()
+
+    # hardware
+
+    def _ctrl(self, k, chain):
+        # chain: the channel to start after this one, None for none
+        dma = self.ch[k]
+        to = self.ch[chain].channel if chain is not None else dma.channel
+        return dma.pack_ctrl(
+            size=2, inc_read=True, inc_write=False, treq_sel=_DREQ_PWM_WRAP0 + _PACER, chain_to=to, irq_quiet=False
+        )
+
+    def _irq(self, dma):
+        self.done_q.append(0 if dma is self.ch[0] else 1)
+
+    def start(self):
+        """Allocate, fill both buffers, start the sound. Cleans up if it fails."""
+        import rp2
+        from array import array
+
+        try:
+            gc.collect()
+            self.raw = bytearray(STEP * self.frame_bytes)
+            self.mv = memoryview(self.raw)
+            self.bufs = (array("I", bytearray(4 * FRAMES)), array("I", bytearray(4 * FRAMES)))
+            if self.sd is not None:
+                self.sd.init_spi(SD_BAUDRATE)
+            self.f.seek(self.offset)
+            self.ch = [rp2.DMA(), rp2.DMA()]
+            write = _reg(_AUDIO, _CC)
+            for k in (0, 1):
+                self.ch[k].config(read=self.bufs[k], write=write, count=1, ctrl=self._ctrl(k, None))
+                self.ch[k].irq(handler=self._irq, hard=False)
+            for k in (0, 1):  # both buffers before the first sample
+                self.filling = k
+                self.state[k] = FILLING
+                while self.filling == k:
+                    self._step()
+            _pacer_setup(self.rate)
+            self.pins = _audio_on()
+            self._go(0)
+            if self.state[1] == FULL:
+                self._arm(1)
+            _pacer(True)
+        except BaseException:
+            self.stop()
+            raise
+        return self
+
+    def _go(self, k):
+        # start buffer k now (nothing playing, or the chain came too late)
+        self.state[k] = PLAYING
+        self.ch[k].active(1)
+
+    def _arm(self, k):
+        # buffer k is full: play it after the other one
+        p = 1 - k
+        if self.state[p] != PLAYING:
+            self._go(k)
             return
-        if not ready[1 - k]:  # chained into a buffer not refilled yet: a gap
-            stats[1] += 1
-        if fresh:  # a replayed buffer's refill is queued already
-            free.append(k)
+        self.ch[p].ctrl = self._ctrl(p, k)
+        if self.ch[k].active() or k in self.done_q:
+            self.state[k] = PLAYING  # the chain took it
+        elif not self.ch[p].active():
+            self._go(k)  # p ended before the chain was armed: a dropout
+        else:
+            self.state[k] = PLAYING  # p still playing: the chain starts k
 
-    try:
-        gc.collect()
-        raw = bytearray(FRAMES * frame_bytes)
-        bufs = (array("I", bytearray(4 * FRAMES)), array("I", bytearray(4 * FRAMES)))
-        mv = memoryview(raw)
-        if sd is not None:
-            sd.init_spi(SD_BAUDRATE)
-        f.seek(offset)
-        left = total
-        left -= fill(0, left)
-        left -= fill(1, left)
-        ch = [rp2.DMA(), rp2.DMA()]
-        dreq = _DREQ_PWM_WRAP0 + _PACER
-        write = _reg(_AUDIO, _CC)
+    def _step(self):
+        # one step of the fill under way: STEP frames read and converted
+        k = self.filling
+        want = min(STEP, FRAMES - self.count[k], self.left)
+        got = 0
+        if want > 0:
+            if self.sd is not None:
+                self.sd.init_spi(SD_BAUDRATE)  # another app may have set it back
+            got = (self.f.readinto(self.mv[: want * self.frame_bytes]) or 0) // self.frame_bytes
+        if got:
+            convert(self.raw, memoryview(self.bufs[k])[self.count[k] :], got, self.channels, self.bits, _volume)
+            self.count[k] += got
+            self.left -= got
+        if got and self.count[k] < FRAMES and self.left > 0:
+            return
+        self.filling = None  # this buffer is done
+        if self.count[k] == 0:  # nothing more: the other buffer has the end
+            self.state[k] = FREE
+            self.last = 1 - k
+            if self.state[1 - k] == FREE:
+                self.ended = True
+            return
+        if self.left <= 0 or not got:
+            self.last = k
+        self.ch[k].count = self.count[k]
+        self.state[k] = FULL
 
-        def ctrl(k, chain):
-            other = ch[1 - k].channel if chain else ch[k].channel
-            return ch[k].pack_ctrl(
-                size=2, inc_read=True, inc_write=False, treq_sel=dreq, chain_to=other, irq_quiet=False
-            )
+    # the work, a step at a time
 
-        last = 0 if counts[1] == 0 else (1 if left == 0 else -1)
-        stats[2] = last
-        ch[1].config(read=bufs[1], write=write, count=max(1, counts[1]), ctrl=ctrl(1, last != 1))
-        ch[0].irq(handler=done, hard=False)
-        ch[1].irq(handler=done, hard=False)
-        _pacer_setup(rate)
-        pins = _audio_on()
-        _draw(name or path, (channels, rate, bits), total_s)
-        ch[0].config(read=bufs[0], write=write, count=counts[0], ctrl=ctrl(0, last != 0), trigger=True)
-        _pacer(True)
-        paused = False
-        shown = None
-        progress = polled = _ticks_ms()
-        while True:
-            if free:
-                progress = _ticks_ms()
-                k = free.pop(0)
-                if k == -1:
-                    break  # end of the file
-                if stats[2] == -1:
-                    n = fill(k, left)
-                    left -= n
-                    if n == 0:  # nothing left: the playing channel is the last
-                        stats[2] = 1 - k
-                        ch[1 - k].ctrl = ctrl(1 - k, False)
-                    else:
-                        ch[k].count = n
-                        if left <= 0:
-                            stats[2] = k
-                            ch[k].ctrl = ctrl(k, False)
-            now = _ticks_ms()
-            key = None
-            if _ticks_diff(now, polled) >= KEY_MS:
-                polled = now
-                key = _poll_key()
-            if key in _QUIT:
-                result = "quit"
-                break
-            if key in ("right", "n"):
-                result = "next"
-                break
-            if key in ("left", "p"):
-                result = "prev"
-                break
-            if key == " ":
-                paused = not paused
-                _pacer(not paused)
-                shown = None
-                progress = now
-            elif key in ("+", "=", "up") and _volume < VOLUME_MAX:
-                _volume += 1
-                shown = None
-            elif key in ("-", "_", "down") and _volume > 0:
-                _volume -= 1
-                shown = None
-            if not paused and _ticks_diff(now, progress) > STALL_MS:
-                raise OSError("audio stalled")  # no buffer finished: never loop on stale samples
-            if shown is None or _ticks_diff(now, shown) >= 500:
-                _status(stats[0] / rate, total_s, paused, stats[1])
-                shown = now
-            if not free:
-                _sleep_ms(5)
-    finally:
+    def pump(self, steps=1):
+        """Handle the buffers the DMA finished and fill the next one, up to
+        `steps` steps. Call it often: a buffer lasts FRAMES / rate seconds."""
+        while self.done_q:
+            k = self.done_q.pop(0)
+            if self.state[k] != PLAYING:
+                continue
+            self.ch[k].read = self.bufs[k]  # READ_ADDR isn't reloaded on a chain
+            self.ch[k].ctrl = self._ctrl(k, None)
+            self.played += self.count[k]
+            self.count[k] = 0
+            self.state[k] = FREE
+            self.progress = _ticks_ms()
+            if k == self.last:
+                self.ended = True
+                return
+            other = 1 - k
+            if self.state[other] == FULL:  # full but not chained in time
+                self._go(other)
+            elif self.state[other] != PLAYING:
+                self.gaps += 1
+        while steps > 0 and self.last == -1 and not self.ended:
+            if self.filling is None:
+                k = 0 if self.state[0] == FREE else (1 if self.state[1] == FREE else None)
+                if k is None:
+                    return
+                self.filling = k
+                self.state[k] = FILLING
+            self._step()
+            steps -= 1
+            if self.filling is None and self.state[0] != FILLING and self.state[1] != FILLING:
+                for k in (0, 1):
+                    if self.state[k] == FULL:
+                        self._arm(k)
+
+    def stalled(self):
+        # a buffer playing that never finishes: the DMA stopped
+        playing = PLAYING in self.state
+        return playing and not self.paused and _ticks_diff(_ticks_ms(), self.progress) > STALL_MS
+
+    def pause(self, on):
+        self.paused = bool(on)
+        _pacer(not self.paused)
+        self.progress = _ticks_ms()
+
+    def stop(self):
+        """Silence, release the DMA channels, the SD clock and the file."""
+        from machine import mem32
+
         _pacer(False)  # no more requests: a busy channel waits mid-buffer
-        for dma in ch:
+        for dma in self.ch:
             dma.irq(handler=None)
-        scratch = _drain(ch)
-        for dma in ch:
+        scratch = _drain(self.ch)
+        for dma in self.ch:
             # close() aborts: only idle channels by now (_drain); active(0)
             # aborts an enabled one, which can spin forever (erratum E5)
             dma.close()
         scratch = None
-        if pins is not None:
+        self.ch = []
+        if self.pins is not None:
             _ramp(mem32[_reg(_AUDIO, _CC)], 0)
-        if sd is not None:
-            sd.init_spi(SD_DEFAULT_BAUDRATE)
-        f.close()
-        print("\x1b[?25h", end="")
-        last_stats.update(frames=stats[0], total=total, gaps=stats[1], ms=_ticks_diff(_ticks_ms(), started), rate=rate)
-        bufs = raw = mv = None
+            self.pins = None
+        if self.sd is not None:
+            self.sd.init_spi(SD_DEFAULT_BAUDRATE)
+        self.f.close()
+        last_stats.update(
+            frames=self.played, total=self.total, gaps=self.gaps, ms=_ticks_diff(_ticks_ms(), self.started), rate=self.rate
+        )
+        self.bufs = self.raw = self.mv = None
         gc.collect()
-    return result
+
+
+# ── playing ─────────────────────────────────────
+
+
+def _play_ui(p):
+    """The now-playing screen over a started Player. Returns "end", "next",
+    "prev", "quit" or "back" (b: it goes on playing in the background)."""
+    global _volume
+    _draw(p.name, (p.channels, p.rate, p.bits), p.total / p.rate)
+    shown = None
+    polled = _ticks_ms()
+    while True:
+        p.pump(2)
+        if p.ended:
+            return "end"
+        now = _ticks_ms()
+        key = None
+        if _ticks_diff(now, polled) >= KEY_MS:
+            polled = now
+            key = _poll_key()
+        if key in _QUIT:
+            return "quit"
+        if key in ("right", "n"):
+            return "next"
+        if key in ("left", "p"):
+            return "prev"
+        if key == "b":
+            return "back"
+        if key == " ":
+            p.pause(not p.paused)
+            shown = None
+        elif key in ("+", "=", "up") and _volume < VOLUME_MAX:
+            _volume += 1
+            shown = None
+        elif key in ("-", "_", "down") and _volume > 0:
+            _volume -= 1
+            shown = None
+        if p.stalled():
+            raise OSError("audio stalled")  # a buffer that never ended
+        if shown is None or _ticks_diff(now, shown) >= 500:
+            _status(p.played / p.rate, p.total / p.rate, p.paused, p.gaps)
+            shown = now
+        if p.filling is None and not p.done_q:
+            _sleep_ms(5)
+
+
+def play_file(path, name=None):
+    """Play one WAV file in the foreground. Returns "end", "next", "prev" or
+    "quit". Space pauses, +/- volume, left/right track, q stops."""
+    p = Player(path, name).start()
+    result = "quit"
+    try:
+        result = _play_ui(p)
+    finally:
+        print("\x1b[?25h", end="")
+        if result != "back":
+            p.stop()
+    return result if result != "back" else "quit"
+
+
+# ── in the background ───────────────────────────
+# b on the now-playing screen leaves the player: the music goes on through
+# the playlist while other apps run, pumped from every key wait (an app that
+# blocks, a network request, pauses it for that long). Opening Music again
+# shows it; q there stops it, and so does leaving the launcher.
+
+_BG = [None]  # [player, tracks, position] while playing in the background
+
+
+def playing():
+    """The name of the track playing in the background, or None."""
+    bg = _BG[0]
+    return bg[0].name if bg is not None else None
+
+
+def _bg_tick():
+    bg = _BG[0]
+    if bg is None:
+        return
+    p = bg[0]
+    try:
+        p.pump(2)
+        if p.stalled():
+            raise OSError("audio stalled")
+        if not p.ended:
+            return
+        p.stop()
+        pos = bg[2] + 1
+        if pos < len(bg[1]):
+            bg[0] = Player(bg[1][pos][1], bg[1][pos][0]).start()
+            bg[2] = pos
+            return
+    except Exception:
+        try:
+            bg[0].stop()
+        except Exception:
+            pass
+    _bg_clear()
+
+
+def _bg_clear():
+    _BG[0] = None
+    _set_tick(None)
+    _set_status_extra("")
+
+
+def _bg_start(p, tracks, pos):
+    _BG[0] = [p, tracks, pos]
+    _set_tick(_bg_tick)
+    _set_status_extra("♪")
+
+
+def background_stop():
+    """Stop the music playing in the background (the launcher does it when
+    it leaves to the REPL)."""
+    bg = _BG[0]
+    if bg is None:
+        return False
+    _bg_clear()
+    try:
+        bg[0].stop()
+    except Exception:
+        pass
+    return True
 
 
 def player(start=0):
-    """Track list: Enter plays from there to the end of the list."""
-    tracks = songs()
-    if not tracks:
-        _screen_header("Music")
-        print("No .wav files in /sd/music or /sd.")
-        print("")
-        print("MP3 can't be decoded on the PicoCalc: convert")
-        print("on the computer with tools/to_wav.sh (16-bit,")
-        print("22050 Hz, stereo) and copy to /sd/music.")
-        _wait_key()
-        return None
+    """Track list: Enter plays from there to the end of the list; b on the
+    now-playing screen keeps it playing in the background."""
+    bg = _BG[0]
+    if bg is not None:  # back to the music already playing
+        _bg_clear()
+        p, tracks, pos = bg
+    else:
+        p = None
+        tracks = songs()
+        if not tracks:
+            _screen_header("Music")
+            print("No .wav files in /sd/music or /sd.")
+            print("")
+            print("MP3 can't be decoded on the PicoCalc: convert")
+            print("on the computer with tools/to_wav.sh (16-bit,")
+            print("22050 Hz, stereo) and copy to /sd/music.")
+            _wait_key()
+            return None
+        pos = min(start, len(tracks) - 1)
     labels = [t[0] for t in tracks]
     hints = [_format_bytes(t[2]) for t in tracks]
-    pos = min(start, len(tracks) - 1)
     while True:
-        key, pos = _pick("Music", labels, hints, pos=pos)
-        if key in _QUIT or key == "left":
-            _clear_screen()
-            return None
-        if key not in ("enter", "right"):
-            continue
+        if p is None:
+            key, pos = _pick("Music", labels, hints, pos=pos)
+            if key in _QUIT or key == "left":
+                _clear_screen()
+                return None
+            if key not in ("enter", "right"):
+                continue
         while 0 <= pos < len(tracks):
+            result = "quit"
             try:
-                result = play_file(tracks[pos][1], tracks[pos][0])
+                if p is None:
+                    p = Player(tracks[pos][1], tracks[pos][0]).start()
+                result = _play_ui(p)
             except (OSError, ValueError, MemoryError) as error:
                 print("\x1b[13;1H" + _paint("Can't play: {}".format(error), BRED))
                 _wait_key()
-                result = "quit"
+            finally:
+                print("\x1b[?25h", end="")
+            if result == "back" and p is not None:
+                _bg_start(p, tracks, pos)
+                _clear_screen()
+                return None
+            if p is not None:
+                p.stop()
+                p = None
             if result == "quit":
                 break
             pos += -1 if result == "prev" else 1

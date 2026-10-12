@@ -3,8 +3,9 @@
 #   test_net.py     wifi_manager, openrouter_ai, weather, pico_utils' network helpers
 #   test_news.py    rss_news, Miniflux, notes
 #   test_tools.py   files, apps, scientific_calc
-#   test_hw.py      music, synthesizer, snake, clock_ntp, sys_status
-#   test_os.py      pico_utils' OS layer: settings, flash writes, power, idle
+#   test_hw.py      synthesizer, snake, clock_ntp, sys_status
+#   test_os.py      pico_utils' OS layer: settings, power, idle
+#   test_music.py   music: WAV, conversion, playback on a DMA model, background
 # Run one from the repo root with either interpreter:
 #   python3 tests/test_core.py
 #   micropython tests/test_core.py
@@ -71,6 +72,27 @@ def rm_tree(path):
         except OSError:
             rm_tree(full)
     os.rmdir(path)
+
+
+# module attributes stubbed for a test and put back after it
+
+
+def swap(module, attrs):
+    # Stub module attributes; returns what unswap() puts back (None: a
+    # builtin such as open or print, whose stub is deleted again)
+    old = {}
+    for name in attrs:
+        old[name] = getattr(module, name, None)
+        setattr(module, name, attrs[name])
+    return old
+
+
+def unswap(module, old):
+    for name in old:
+        if old[name] is None:
+            delattr(module, name)
+        else:
+            setattr(module, name, old[name])
 
 
 # keys: feed raw bytes the way the PicoCalc driver emits them

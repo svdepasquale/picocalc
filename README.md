@@ -466,6 +466,12 @@ Full command list:
 - the list shows every `.wav`; Enter plays from there to the end of the list
 - Space pauses, `+`/`-` (or ↑/↓) set the volume (0-16), ←/→ previous/next
   track, `q` stops
+- `b` keeps it playing **in the background**: back to the launcher, the
+  playlist goes on while you use the other apps (the title bar shows ♪ and
+  Music's line the track). It is fed from every key wait, so an app that
+  blocks for a while (a network request) pauses it for that long. Open
+  Music again for the controls; `q` there stops it, and so does leaving the
+  launcher to the REPL
 - formats: PCM WAV, 8 or 16-bit, mono or stereo, 4000-48000 Hz.
   **16-bit stereo at 22,050 Hz** is the sweet spot (88 KB/s from the card)
 
@@ -478,21 +484,24 @@ tools/to_wav.sh song.mp3 other.m4a     # -> song.wav, other.wav
 ```
 
 It uses macOS `afconvert` (or `ffmpeg` elsewhere) and writes 16-bit stereo
-22,050 Hz files; copy them to `music/` on the card with a card reader (USB
-serial manages only ~8 KB/s, minutes per song).
+22,050 Hz files; copy them to `music/` on the card with Transfer (`t`, over
+Wi-Fi) or a card reader (USB serial manages only ~8 KB/s, minutes per song).
 
 How it plays: PWM slice 5 drives GP26 (left) and GP27 (right) with a
 146 kHz carrier and 10-bit levels; a PWM slice with no pins ticks at the
 sample rate and paces two chained DMA channels that write each sample into
-the PWM, while Python refills the idle buffer from the SD card (read at
-8 MHz during playback, then the driver's 1.3 MHz again). The screen shows
-"gaps" if the card ever falls behind.
+the PWM, while Python refills the idle buffer from the SD card a step at a
+time (read at 8 MHz during playback, then the driver's 1.3 MHz again). A
+channel chains to the other only once that buffer is full, so if the card
+falls behind the sound stops for a moment (the screen counts these "gaps")
+instead of replaying old samples, and the end of a track always plays.
 
 Commands:
 - `music.player()` / `music.m()` → the track list
 - `music.play('/sd/music/song.wav')` / `music.p()` → one file
 - `music.volume(12)` → 0-16
 - `music.ls()` → list the tracks found
+- `music.playing()` → the track playing in the background, `music.background_stop()`
 
 ## First-time setup
 1. Upload the `.py` files of the repo root to the Pico root (not `tests/`),

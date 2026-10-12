@@ -18,7 +18,7 @@ from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_m
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 WAIT_MS = 1000  # the menu looks at the status this often (a background join)
@@ -55,6 +55,8 @@ def _load(name):
     gc.collect()
     if name not in sys.modules and _mem_free() < LOW_MEMORY:
         for other in _APP_MODULES:
+            if other == "music" and _music_playing():
+                continue  # playing in the background: its state lives there
             if other != name and other in sys.modules:
                 del sys.modules[other]
         gc.collect()
@@ -302,7 +304,15 @@ def _hint_apps():
     return "{} found".format(count) if count else ""
 
 
+def _music_playing():
+    m = sys.modules.get("music")
+    return m.playing() if m is not None else None
+
+
 def _hint_music():
+    name = _music_playing()
+    if name:
+        return "\u266a " + name
     import os
 
     count = 0
@@ -622,6 +632,8 @@ def run(connect=True):
         note = " (USB host)"
     finally:
         _screen_on()  # a REPL needs a screen
+        if _music_playing():
+            sys.modules["music"].background_stop()  # nothing pumps it at the REPL
         gfx.end()  # never leave the REPL on the console
     print("REPL{}. Menu: import go".format(note))
 
