@@ -494,7 +494,7 @@ def test_music_background_playlist():
     try:
         p = music.Player(tracks[0][1], "a").start()
         music._bg_start(p, tracks, 0)
-        check("tick set, the note shown", (pu._TICK[0] is music._bg_tick, pu._EXTRA[0]), (True, "\u266a"))
+        check("tick set, the mark shown", (pu._TICK[0] is music._bg_tick, pu._EXTRA[0]), (True, "►"))
         check("playing", music.playing(), "a")
         for _ in range(4000):
             if music._BG[0] is None:
@@ -504,7 +504,7 @@ def test_music_background_playlist():
         check("both tracks to the end", (music._BG[0], sim.words), (None, 2 * frames))
         check("no old samples, no aborts", (sim.stale, sim.errors), (0, []))
         check("files closed", [f.closed for f in files], [True, True])
-        check("tick and note gone", (pu._TICK[0], pu._EXTRA[0]), (None, ""))
+        check("tick and mark gone", (pu._TICK[0], pu._EXTRA[0]), (None, ""))
     finally:
         _bg_teardown(saved, modules)
 

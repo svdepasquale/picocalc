@@ -442,7 +442,7 @@ _STATUS = [None, 0, False, None]  # read at, UTC offset, Wi-Fi up, battery
 
 
 _STATUS_VER = [0]
-_EXTRA = [""]  # a mark the title bar shows first (the music playing: a note)
+_EXTRA = [""]  # a mark the title bar shows first (the music playing: ►)
 
 
 def set_status_extra(text):

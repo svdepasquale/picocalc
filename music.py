@@ -648,7 +648,7 @@ def _bg_clear():
 def _bg_start(p, tracks, pos):
     _BG[0] = [p, tracks, pos]
     _set_tick(_bg_tick)
-    _set_status_extra("♪")
+    _set_status_extra("►")  # CP437 has ♪ at 0x0D: drawn as a space
 
 
 def background_stop():

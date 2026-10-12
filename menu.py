@@ -312,7 +312,7 @@ def _music_playing():
 def _hint_music():
     name = _music_playing()
     if name:
-        return "\u266a " + name
+        return "► " + name
     import os
 
     count = 0

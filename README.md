@@ -467,7 +467,7 @@ Full command list:
 - Space pauses, `+`/`-` (or ↑/↓) set the volume (0-16), ←/→ previous/next
   track, `q` stops
 - `b` keeps it playing **in the background**: back to the launcher, the
-  playlist goes on while you use the other apps (the title bar shows ♪ and
+  playlist goes on while you use the other apps (the title bar shows ► and
   Music's line the track). It is fed from every key wait, so an app that
   blocks for a while (a network request) pauses it for that long. Open
   Music again for the controls; `q` there stops it, and so does leaving the
