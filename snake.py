@@ -1,28 +1,23 @@
 """Snake for the PicoCalc keyboard: arrows or WASD steer, p pauses, m turns
-the sound off and on, q quits. The best score is kept in snake.json."""
+the sound off and on, q quits. The best score is kept on the SD card
+(games.py): the old snake.json on flash is read once, never written."""
 
 import random
 
-from pico_utils import DISPLAY_WIDTH, PAGE_LINES
-from pico_utils import clear_screen as _clear_screen, load_json as _load_json
-from pico_utils import paint as _paint, poll_key as _poll_key, read_key as _read_key
-from pico_utils import save_json as _save_json, sleep_ms as _sleep_ms
-from pico_utils import speakers_busy as _speakers_busy
-from pico_utils import ticks_add as _ticks_add, ticks_diff as _ticks_diff
-from pico_utils import ticks_ms as _ticks_ms, title_bar as _title_bar
-from pico_utils import BGREEN, BRED, BYELLOW, GREEN, GREY
+import games
+from games import Pad as _Pad, Screen as _Screen, Sound as _Sound
+from pico_utils import sleep_ms as _sleep_ms, ticks_add as _ticks_add
+from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
+from pico_utils import BLACK, BGREEN, BRED, BWHITE, BYELLOW, GREEN, GREY, WHITE
 
 
 MODULE_VERSION = "2026-10-12.1"
-CONFIG_FILE = "snake.json"
 START_MS = 150  # time per step at the start
 FASTEST_MS = 60
 SPEEDUP_MS = 4  # per food eaten
-SPEAKER_PIN = 26
-_TOP = 3  # screen row of field row 0 (title bar, wall)
-_BODY = "█"
-_FOOD = "■"
-_QUIT = ("q", "Q", "esc", "eof")
+POLL_MS = 20  # keys are read this often between steps
+WIDTH = 30  # field, in cells
+HEIGHT = 28
 _HEADINGS = {
     "up": (0, -1), "w": (0, -1), "W": (0, -1),
     "down": (0, 1), "s": (0, 1), "S": (0, 1),
@@ -114,151 +109,145 @@ def step(state):
 
 
 # ── screen ──────────────────────────────────────
+# Straight into the framebuffer: a step erases the tail's cell and draws two
+# others (~60 us), where the screen console took a cursor move and a coloured
+# character for each.
+
+CELL = 10
+X0 = (320 - WIDTH * CELL) // 2
+Y0 = 22
+_STATUS_Y = Y0 + HEIGHT * CELL + 7
 
 
-def _cell(cell, text):
-    return "\x1b[{};{}H{}".format(_TOP + cell[1], 2 + cell[0], text)
+def _xy(cell):
+    return X0 + cell[0] * CELL, Y0 + cell[1] * CELL
 
 
-def _at(cell, text):
-    print(_cell(cell, text), end="")
+def _body(fb, cell):
+    x, y = _xy(cell)
+    fb.fill_rect(x + 1, y + 1, CELL - 2, CELL - 2, GREEN)
 
 
-def _status(state, best, sound, text=None):
-    row = _TOP + state["h"] + 1
-    if text is None:
-        score = state["score"]
-        text = "Score {}  Best {}   ".format(score, max(best, score)) + "  ".join(
-            _paint(key, BYELLOW) + " " + label
-            for key, label in (("p", "pause"), ("m", "sound " + ("on" if sound else "off")), ("q", "quit"))
-        )
-    print("\x1b[{};1H\x1b[K{}\x1b[{};1H".format(row, text, row + 1), end="")
+def _head(fb, cell, heading):
+    x, y = _xy(cell)
+    fb.fill_rect(x + 1, y + 1, CELL - 2, CELL - 2, BGREEN)
+    # an eye on the side it looks to
+    ex = x + (6 if heading[0] > 0 else 2 if heading[0] < 0 else 3)
+    ey = y + (6 if heading[1] > 0 else 2 if heading[1] < 0 else 3)
+    fb.fill_rect(ex, ey, 2, 2, BLACK)
 
 
-def _draw_board(state, best, sound):
-    # Walls by cursor moves, not lines of spaces: the screen is clear and
-    # the terminal draws every character it gets.
-    width, height = state["w"], state["h"]
-    side = _paint("\u2551", GREY)
-    out = [_title_bar("Snake"), "\n", _paint("\u2554" + "\u2550" * width + "\u2557", GREY)]
-    for y in range(_TOP, _TOP + height):
-        out.append("\x1b[{};1H{}\x1b[{};{}H{}".format(y, side, y, width + 2, side))
-    out.append("\x1b[{};1H".format(_TOP + height) + _paint("\u255a" + "\u2550" * width + "\u255d", GREY))
+def _food(fb, cell):
+    x, y = _xy(cell)
+    fb.fill_rect(x + 2, y + 2, CELL - 4, CELL - 3, BRED)
+    fb.fill_rect(x + 1, y + 3, CELL - 2, CELL - 5, BRED)
+    fb.fill_rect(x + 5, y, 2, 2, BGREEN)
+
+
+def _erase(fb, cell):
+    x, y = _xy(cell)
+    fb.fill_rect(x, y, CELL, CELL, BLACK)
+
+
+def _status(fb, score, best):
+    fb.fill_rect(0, _STATUS_Y, 170, 8, BLACK)
+    x = games.gfx.text("Score {}".format(score), X0, _STATUS_Y, BWHITE)
+    games.gfx.text("Best {}".format(max(best, score)), x + 18, _STATUS_Y, GREY)
+
+
+def _draw(fb, state, best):
+    fb.fill_rect(0, 12, 320, 308, BLACK)
+    games.title("Snake")
+    w = WIDTH * CELL
+    h = HEIGHT * CELL
+    fb.fill_rect(X0 - 4, Y0 - 4, w + 8, 2, GREY)
+    fb.fill_rect(X0 - 4, Y0 + h + 2, w + 8, 2, GREY)
+    fb.fill_rect(X0 - 4, Y0 - 4, 2, h + 8, GREY)
+    fb.fill_rect(X0 + w + 2, Y0 - 4, 2, h + 8, GREY)
     for cell in state["snake"][:-1]:
-        out.append(_cell(cell, _paint(_BODY, GREEN)))
-    out.append(_cell(state["snake"][-1], _paint(_BODY, BGREEN)))
+        _body(fb, cell)
+    _head(fb, state["snake"][-1], state["dir"])
     if state["food"] is not None:
-        out.append(_cell(state["food"], _paint(_FOOD, BRED)))
-    _clear_screen()
-    print("\x1b[?25l" + "".join(out), end="")  # no blinking cursor on the board
-    _status(state, best, sound)
+        _food(fb, state["food"])
+    _status(fb, state["score"], best)
+    games.gfx.key_bar(_KEYS, 320 - games._keys_width(_KEYS) - 4, _STATUS_Y)
 
 
-def _blip():
-    # Not over the music in the background: setting the slice up for the
-    # blip silenced the track. Silent and released whatever happens (a
-    # Ctrl+C from USB in the sleep left the tone on).
-    if _speakers_busy():
-        return
-    try:
-        from machine import PWM, Pin
-
-        pwm = PWM(Pin(SPEAKER_PIN))
-        try:
-            pwm.freq(1320)
-            pwm.duty_u16(8000)
-            _sleep_ms(15)
-        finally:
-            pwm.duty_u16(0)
-            pwm.deinit()
-    except Exception:
-        pass
+_KEYS = tuple((games.gfx.cp(k), games.gfx.cp(v)) for k, v in (("p", "pause"), ("m", "sound"), ("q", "quit")))
 
 
-def _game(width, height, best, sound):
-    # One game: returns (score, sound, quit).
-    state = new_game(width, height)
-    _draw_board(state, best, sound)
-    _park = "\x1b[{};1H".format(_TOP + height + 2)
+def _crash(fb, cell):
+    x, y = _xy(cell)
+    fb.fill_rect(x, y, CELL, CELL, BRED)
+    fb.line(x + 2, y + 2, x + CELL - 3, y + CELL - 3, BWHITE)
+    fb.line(x + CELL - 3, y + 2, x + 2, y + CELL - 3, BWHITE)
+
+
+def _game(state, fb, pad, sound, best):
+    # One game: (score, True at the end, False when it was left).
+    _draw(fb, state, best)
     delay = START_MS
     due = _ticks_add(_ticks_ms(), delay)
     while True:
-        key = _poll_key()
-        while key is not None:
+        for key in pad.poll():
             if key in _HEADINGS:
                 turn(state, _HEADINGS[key])
-            elif key in _QUIT:
-                return state["score"], sound, True
-            elif key in ("p", "P", " "):
-                _status(state, best, sound, "Paused: any key")
-                _read_key()
-                _status(state, best, sound)
-                due = _ticks_add(_ticks_ms(), delay)
             elif key in ("m", "M"):
-                sound = not sound
-                _status(state, best, sound)
-            key = _poll_key()
-        if _ticks_diff(due, _ticks_ms()) > 0:
-            _sleep_ms(5)
-            continue
-        due = _ticks_add(_ticks_ms(), delay)
-        tail, old_head = state["snake"][0], state["snake"][-1]
-        result = step(state)
-        if result == "dead":
-            _at(old_head, _paint("X", BRED))
-            return state["score"], sound, False
-        # One write per step; the cursor parks under the field.
-        out = _cell(tail, " ") if result == "moved" else ""
-        out += _cell(old_head, _paint(_BODY, GREEN)) + _cell(state["snake"][-1], _paint(_BODY, BGREEN))
-        print(out + _park, end="")
-        if result == "ate":
-            delay = max(FASTEST_MS, delay - SPEEDUP_MS)
-            if sound:
-                _blip()
-            if place_food(state) is None:  # the snake fills the field
-                return state["score"], sound, False
-            _at(state["food"], _paint(_FOOD, BRED))
-            _status(state, best, sound)
+                sound.toggle()
+            elif key == "quit":
+                return state["score"], False
+            elif key in ("p", "P", " ", "esc", "q", "Q", "power"):
+                if not games.pause(pad, sound, key):
+                    return state["score"], False
+                _draw(fb, state, best)
+                due = _ticks_add(_ticks_ms(), delay)
+        if _ticks_diff(_ticks_ms(), due) >= 0:
+            due = _ticks_add(_ticks_ms(), delay)
+            tail, old_head = state["snake"][0], state["snake"][-1]
+            result = step(state)
+            if result == "dead":
+                _crash(fb, old_head)
+                sound.beep(98, 300)
+                _sleep_ms(500)
+                return state["score"], True
+            if result == "moved":
+                _erase(fb, tail)
+            _body(fb, old_head)
+            _head(fb, state["snake"][-1], state["dir"])
+            if result == "ate":
+                delay = max(FASTEST_MS, delay - SPEEDUP_MS)
+                sound.beep(1320, 25)
+                _status(fb, state["score"], best)
+                if place_food(state) is None:  # the snake fills the field
+                    return state["score"], True
+                _food(fb, state["food"])
+        sound.update()
+        wait = min(POLL_MS, _ticks_diff(due, _ticks_ms()))
+        if wait > 0:
+            _sleep_ms(wait)
 
 
 def play():
     """Games until q; returns the best score."""
-    config = _load_json(CONFIG_FILE) or {}
-    try:
-        best = int(config.get("best") or 0)
-    except (TypeError, ValueError):
-        best = 0
-    sound = bool(config.get("sound", True))
-    saved = (best, sound)
-    width = max(10, DISPLAY_WIDTH - 2)
-    height = max(5, PAGE_LINES - 2)
+    screen = _Screen()
+    if screen.fb is None:
+        print("Snake draws on the PicoCalc screen.")
+        return games.best("snake")
+    pad = _Pad()
+    sound = _Sound()
+    best = games.best("snake")
     try:
         while True:
-            score, sound, quit = _game(width, height, best, sound)
-            record = score > best
+            score, finished = _game(new_game(WIDTH, HEIGHT), screen.fb, pad, sound, best)
+            new = games.record("snake", score)
             best = max(best, score)
-            if quit:
+            games.flush()
+            if not finished or not games.game_over(pad, sound, score, best, new):
                 break
-            done = "New best: {}!".format(score) if record else "Game over: {}.".format(score)
-            row = _TOP + height + 1
-            print(
-                "\x1b[{};1H\x1b[K{}  {} again  {} back".format(
-                    row, _paint(done, BGREEN if record else BRED), _paint("Enter", BYELLOW), _paint("q", BYELLOW)
-                ),
-                end="",
-            )
-            key = None
-            while key not in ("enter", " ") and key not in _QUIT:
-                key = _read_key()
-            if key in _QUIT:
-                break
-    except KeyboardInterrupt:
-        pass
     finally:
-        if (best, sound) != saved:
-            _save_json(CONFIG_FILE, {"best": best, "sound": sound})
-        _clear_screen()
-        print("\x1b[?25h", end="")
+        sound.close()
+        screen.close()
+        games.flush(True)
     return best
 
 
@@ -274,7 +263,7 @@ def help():
     print("-- Snake --")
     print("play()  p()  Arrows/WASD steer, p pause,")
     print("             m sound, q quit")
-    print("Best score: snake.json")
+    print("Best score: /sd/games.json")
 
 
 def h():

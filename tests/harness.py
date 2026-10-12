@@ -3,7 +3,8 @@
 #   test_net.py     wifi_manager, openrouter_ai, weather, pico_utils' network helpers
 #   test_news.py    rss_news, Miniflux, notes
 #   test_tools.py   files, apps, scientific_calc
-#   test_hw.py      synthesizer, snake, clock_ntp, sys_status
+#   test_hw.py      synthesizer, clock_ntp, sys_status
+#   test_games.py   the games list and scores, the key pad, Snake, Tetris, Space Raid
 #   test_os.py      pico_utils' OS layer: settings, power, idle
 #   test_music.py   music: WAV, conversion, playback on a DMA model, background
 # Run one from the repo root with either interpreter:
@@ -196,6 +197,12 @@ class FakeDisplay:
 
     def blit(self, src, x, y, key=-1, palette=None):
         self.calls.append(("blit", x, y))
+
+    def line(self, x0, y0, x1, y1, c):
+        self.calls.append(("line", x0, y0, x1, y1, c))
+
+    def rect(self, x, y, w, h, c, fill=False):
+        self.calls.append(("rect", x, y, w, h, c))
 
     def pixel(self, x, y, c=None):
         return 0
