@@ -1,6 +1,6 @@
 # PicoCalc Toolkit
 
-Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calculator + Synthesizer + Music + Files + Wi-Fi file transfer + Apps + Snake + Settings toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
+Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calculator + Synthesizer + Music + Files + Wi-Fi file transfer + Apps + Games (Snake, Tetris, Space Raid) + Settings toolkit for the PicoCalc with a Pico 2W, built to be used standalone with the device's own keyboard and screen.
 
 - a launcher menu that opens at power-on (2.4 s, Wi-Fi joins behind it):
   one key per app, `q` to the REPL
@@ -24,7 +24,10 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calc
 - `gfx_native.py` → native-code (viper) helpers for that console
 - `files.py` → file manager for flash and the SD card
 - `apps.py` → runs the `.py` files in `/sd/apps` (or `/apps` on flash)
-- `snake.py` → Snake, best score kept on flash
+- `games.py` → the Games list, best scores on the SD card, the keyboard read as a game pad
+- `snake.py` → Snake
+- `tetris.py` → Tetris
+- `space.py` → Space Raid, a side-scrolling shooter after the Nokia's Space Impact
 - `pico_utils.py` → shared display/keys/IO utilities (used by other modules)
 - `wifi_manager.py` → connect logic + interactive setup
 - `openrouter_ai.py` → OpenRouter API client + compact chat output
@@ -57,7 +60,7 @@ Data files created automatically:
 - `/notes_data.json` → saved notes/todo items
 - `/weather_config.json` → location (lat, lon, name)
 - `/miniflux_config.json` → Miniflux URL + API key (optional)
-- `/snake.json` → Snake best score and sound setting
+- `/sd/games.json` → the games' best scores and switches (on flash, `/games.json`, when there is no card; an old `/snake.json` is read once)
 - `/settings.json` → brightness, keyboard light, dim/screen-off delays, Wi-Fi at start (Settings)
 
 ## Launcher (standalone use)
@@ -66,7 +69,7 @@ It opens by itself when the PicoCalc is switched on; from the REPL,
 
 ```
 1 WiFi   2 AI chat   3 News   4 Weather   5 Notes   6 Calculator
-7 Synth piano   8 Clock   9 System   0 Files   m Music   a Apps   s Snake
+7 Synth piano   8 Clock   9 System   0 Files   m Music   a Apps   g Games
 c Calendar   t Transfer   o Settings
 ```
 
@@ -614,10 +617,29 @@ Commands:
 - `apps.run_app('/sd/apps/hello.py')` / `apps.r()` → run one file
 - `apps.ls()` → print what was found
 
-## Snake
-`s` in the launcher, or `import snake; snake.play()`. Arrows or WASD
-steer, `p` pauses, `m` turns the sound off and on, `q` quits. Each food
-speeds it up; the best score is kept in `/snake.json`.
+## Games
+`g` in the launcher, or `import games; games.show()`: Snake, Tetris and
+Space Raid, each also on its own (`import tetris; tetris.play()`). In every
+game `p`, Esc or `q` pause (then Enter plays on, `q` quits), `m` turns the
+sound off and on (it stays off while music plays in the background), and
+the score box after a game takes Enter for another one, `q` to go back.
+The best scores live in `/sd/games.json`: a game never writes the Pico's
+flash while it runs (with the panel refresh on, a flash write can hang the
+PicoCalc; without a card the file is written to flash once, when you leave
+a game). While a game runs it reads the keyboard controller itself, so it
+knows which keys are held: the ship flies and Tetris pieces slide while you
+hold an arrow.
+
+- **Snake**: arrows or WASD steer; each food speeds it up.
+- **Tetris**: left/right move (held, they slide), up or `x` turns, `z`
+  turns back, down drops faster, Space drops, `c` holds a piece for later.
+  A level every 10 lines; the next three pieces and a ghost of where the
+  piece lands are shown.
+- **Space Raid**, after the Nokia 3310's Space Impact: arrows fly the
+  ship, Space (or `x`, `z`) fires while held, `c` fires the special weapon
+  the pods give (`M` missiles, `B` a beam across the screen; `+` is a life).
+  Waves of six kinds of ships, a boss at the end of each level, then the
+  levels again, tougher. `n` switches the screen to the 3310's two greens.
 
 ## Calendar
 `c` in the launcher, or `import cal; cal.show()`. A month at a time,
@@ -736,7 +758,10 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 import menu                # menu.run()
 import files               # files.b() files.v(path) files.e(path)
 import apps                # apps.l() apps.r(path) apps.ls()
+import games               # games.s() games.play('tetris')
 import snake               # snake.p()
+import tetris              # tetris.p()
+import space               # space.p()
 import wifi_manager as w   # w.ac() w.acs() w.st() w.saved()
 import openrouter_ai as ai # ai.ask() ai.chat() ai.v()
 import rss_news as n       # n.l() n.r(1) n.v(1) n.f() n.mf()
