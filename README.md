@@ -623,7 +623,8 @@ today, `q` back. `cal.easter(2027)`, `cal.holidays(2027)` and
 screen is up the PicoCalc serves the SD card on the local network: open
 the address it shows (`http://<its IP>/`) in a browser on the same Wi-Fi,
 type the PIN shown on the PicoCalc, pick a folder, then download, upload
-(several files, with a progress bar) or delete. `q` closes it. Measured:
+(several files, with a progress bar) or delete. `q` closes it, also in
+the middle of a transfer. Measured:
 ~290 KB/s up and ~220 KB/s down (USB serial manages ~8 KB/s), so a
 26 MB WAV goes over in about a minute and a half.
 
@@ -640,7 +641,8 @@ kept small: it runs only while its screen is open; a new 6-digit PIN each
 time, needed by every request but the page itself, and 10 wrong ones
 close it; the SD card only (the card's root and the folders directly in
 it), plain file names; uploads up to 64 MB land in a `.part` file that is
-renamed only once complete and removed if anything goes wrong.
+renamed only once complete and removed if anything goes wrong; a client
+has 10 seconds for a request and may not stall a transfer for longer.
 
 ## Settings, power and the screen
 `o` in the launcher, or `import settings; settings.show()`. ↑/↓ choose,
