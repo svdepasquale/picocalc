@@ -7,7 +7,7 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calc
 - power care: the screen dims and then goes off when idle (music keeps
   playing), the power button switches the screen off, Settings switches the
   PicoCalc off; brightness and keyboard light are kept
-- files from a computer's browser to the SD card over Wi-Fi (~290 KB/s)
+- files from a computer's browser to the SD card over Wi-Fi (~270 KB/s)
 - a file manager (view, edit with the firmware's editor, run, delete) and
   an Apps list that runs any `.py` you drop in `/sd/apps`
 - single-key navigation (no Enter) in menus, viewers and pagers; arrows work
@@ -625,7 +625,7 @@ the address it shows (`http://<its IP>/`) in a browser on the same Wi-Fi,
 type the PIN shown on the PicoCalc, pick a folder, then download, upload
 (several files, with a progress bar) or delete. `q` closes it, also in
 the middle of a transfer. Measured:
-~290 KB/s up and ~220 KB/s down (USB serial manages ~8 KB/s), so a
+~270 KB/s up and ~200 KB/s down (USB serial manages ~8 KB/s), so a
 26 MB WAV goes over in about a minute and a half.
 
 From a terminal:

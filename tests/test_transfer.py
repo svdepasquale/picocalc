@@ -155,27 +155,31 @@ def test_uploads():
 
 
 class SlowSocket:
-    # a real socket's side as _Client sees it: recv() times out between
-    # the pieces a client sends; send() takes a little at a time
-    def __init__(self, pieces, gap_ms=0):
+    # a non-blocking socket as _Client sees it: readinto() gives what has
+    # come (None: nothing yet, as lwIP's EAGAIN), write() takes 7 bytes a call
+    def __init__(self, pieces):
         self.pieces = list(pieces)
         self.sent = b""
-        self.timeouts = 0
+        self.waits = 0
+        self.blocking = True
 
-    def settimeout(self, seconds):
-        self.wait = seconds
+    def setblocking(self, flag):
+        self.blocking = flag
 
-    def recv(self, n):
+    def readinto(self, view):
         if not self.pieces:
-            return b""
+            return 0
         piece = self.pieces.pop(0)
         if piece is None:
-            self.timeouts += 1
-            raise OSError(110)  # ETIMEDOUT, as lwIP says it
-        self.pieces.insert(0, piece[n:]) if len(piece) > n else None
-        return piece[:n]
+            self.waits += 1
+            return None
+        n = min(len(view), len(piece))
+        view[:n] = piece[:n]
+        if len(piece) > n:
+            self.pieces.insert(0, piece[n:])
+        return n
 
-    def send(self, data):
+    def write(self, data):
         self.sent += bytes(data[:7])
         return min(7, len(data))
 
@@ -188,9 +192,9 @@ def test_client_waits_and_deadlines():
     try:
         sock = SlowSocket([b"GET /api/ls HTTP/1.1\r\nX-PIN: 1", None, None, b"23456\r\n\r\nbody"])
         client = transfer._Client(sock, state)
-        check("short waits", sock.wait, transfer.WAIT)
+        check("non-blocking", sock.blocking, False)
         got = transfer.read_head(client)
-        check("head across waits", (got[0], got[3]["x-pin"], sock.timeouts), ("GET", "123456", 2))
+        check("head across waits", (got[0], got[3]["x-pin"], sock.waits), ("GET", "123456", 2))
         view = memoryview(bytearray(10))
         check("the rest after the head", (client.readinto(view), bytes(view[:4])), (4, b"body"))
         check("write in pieces", (client.write(b"0123456789abcdef"), sock.sent), (16, b"0123456789abcdef"))
