@@ -42,7 +42,11 @@ command -v timeout >/dev/null 2>&1 && limit="timeout ${TEST_TIMEOUT:-300}"
 status=0
 for file in "$@"; do
   echo "== ${file##*/}"
-  { cat "$root/tests/harness.py"; echo; cat "$file"; } > "$script" || { status=1; continue; }
+  # The panel refresh stops first, once, while core1 is mid-frame (as
+  # tools/deploy.sh does): the tests write the flash a lot, and three test
+  # runs hung the device on 2026-10-11/12 with core1 refreshing (or being
+  # reset around every write); the reset before the next file restores it.
+  { cat "$root/tools/stop_refresh.py"; echo; cat "$root/tests/harness.py"; echo; cat "$file"; } > "$script" || { status=1; continue; }
   fresh || { echo "device not answering after a reset"; status=1; break; }
   # shellcheck disable=SC2086
   $limit mpremote ${PICOCALC_PORT:+connect "$PICOCALC_PORT"} resume run "$script" 2>&1 | tee "$log"
