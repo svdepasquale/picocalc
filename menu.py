@@ -13,6 +13,7 @@ from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
 from pico_utils import refresh_status as _refresh_status, status_version as _status_version
 from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
 from pico_utils import apply_settings as _apply_settings, screen_on as _screen_on
+from pico_utils import activity as _activity
 from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
@@ -611,6 +612,7 @@ def run(connect=True):
     REPL, and so does mpremote/Thonny writing on USB.
     connect: join a saved Wi-Fi network (in the background)."""
     _ensure_screen()
+    _activity()  # idle time from now, not from the last key before the REPL
     _apply_settings()
     gfx.begin()
     note = ""

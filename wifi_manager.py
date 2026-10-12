@@ -7,6 +7,7 @@ from pico_utils import read_key as _read_key, read_line as _read_line, poll_key 
 from pico_utils import clock_synced as _clock_synced, clean as _clean, save_json as _save_json
 from pico_utils import settings as _settings, set_setting as _set_setting
 from pico_utils import add_service as _add_service, refresh_status as _refresh_status
+from pico_utils import remove_service as _remove_service
 
 try:
     import ujson as json
@@ -288,6 +289,7 @@ def connect_saved_networks(wlan, credentials, networks=None):
 
 
 def auto_connect_or_prompt(interactive=True):
+    stop_join()  # the launcher's background join would switch networks under it
     wlan = _sta_wlan(active=True)
 
     if wlan.isconnected():
@@ -394,6 +396,12 @@ def joining():
     return bool(_JOIN)
 
 
+def stop_join():
+    """End a background join (a connect by hand takes over)."""
+    _JOIN.clear()
+    _remove_service(_join_service)
+
+
 def _join_next(wlan, credentials):
     while _JOIN.get("order"):
         ssid = _JOIN["order"].pop(0)
@@ -433,8 +441,9 @@ def _joined(ssid):
 
 
 def _ntp_service(now, waiting):
-    # The clock, quietly: only in a key wait (a request blocks up to 2 s),
-    # three tries 30 s apart.
+    # The clock, quietly: only in a key wait (the request waits up to 2 s, and
+    # its DNS lookup, which that timeout does not cover, up to lwIP's limit
+    # when the network's DNS is down), three tries 30 s apart.
     if _clock_synced():
         return False
     if not waiting or (_NTP[0] and _ticks_diff(now, _NTP[1]) < NTP_RETRY_MS):

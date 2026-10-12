@@ -43,9 +43,11 @@ DISPLAY_WIDTH = 32
 PAGE_LINES = 8
 SCREEN_ROWS = 14
 _TERM_ROWS = 14
+_TERM_COLS = 33
 try:
     _rows, _cols = _terminal().get_screen_size()
     _TERM_ROWS = _rows  # the firmware terminal's 40, for its scroll margins
+    _TERM_COLS = _cols
     # Apps lay out for the console's rows, the fewer: the same screens fit the
     # terminal when they run from the REPL.
     SCREEN_ROWS = min(_rows, CON_ROWS)
@@ -176,42 +178,68 @@ def clean(text):
 
 
 def _safe_csi(text):
-    # The terminal path's guard, whatever reached print(): no scroll margins
-    # (CSI ... r: only _set_margins sets them, straight to the terminal), no
-    # terminal reset (ESC c: it puts the margins back to all 40 rows) and no
-    # cursor row past the last safe one (CSI row;col H/f, CSI row d; relative
-    # moves stop at the bottom margin in vtterminal.c).
-    if "\x1bc" in text:
-        text = text.replace("\x1bc", "")
-    start = text.find("\x1b[")
-    if start < 0:
+    # The terminal path's guard, for whatever reached print() unclean. It keeps
+    # the CSI sequences the toolkit and the REPL's line editor write, and only
+    # inside the screen: scroll margins (CSI r) are dropped (_set_margins sets
+    # them, straight to the terminal), so is every other escape (ESC c resets
+    # the margins to all 40 rows), a lone or cut one too; cursor rows are kept
+    # to 1-39 and columns to 1-53: vtterminal.c takes a row or column of 0 as
+    # -1 and draws outside the framebuffer (found with ASan on its source),
+    # and a line feed on row 40 overflows it (see _set_margins). A sequence
+    # with more parameters than the 10 it keeps (vals[10]) is dropped too.
+    if "\x1b" not in text:
         return text
     out = []
-    done = 0
-    while start >= 0:
-        end = start + 2
-        while end < len(text) and text[end] in "0123456789;?":
+    i = 0
+    n = len(text)
+    while True:
+        esc = text.find("\x1b", i)
+        if esc < 0:
+            out.append(text[i:])
+            break
+        out.append(text[i:esc])
+        if esc + 1 >= n:
+            break
+        if text[esc + 1] != "[":
+            i = esc + 2  # ESC c, ESC 7, ESC D...: gone with their letter
+            continue
+        end = esc + 2
+        while end < n and text[end] in "0123456789;?":
             end += 1
-        if end >= len(text):
+        if end >= n:
             break
         final = text[end]
-        if final in "rHfd":
-            params = text[start + 2 : end]
-            out.append(text[done:start])
-            if final != "r":
-                parts = params.split(";")
-                try:
-                    if int(parts[0] or "1") > _TERM_ROWS - 1:
-                        parts[0] = str(_TERM_ROWS - 1)
-                except ValueError:
-                    parts = ["1"]
-                out.append("\x1b[" + ";".join(parts) + final)
-            done = end + 1
-        start = text.find("\x1b[", end)
-    if not out:
-        return text
-    out.append(text[done:])
+        params = text[esc + 2 : end]
+        i = end + 1
+        if final == "r" or params.count(";") > 7:
+            continue  # margins; or past vtterminal.c's 10 parameter slots
+        if final in "HfdG" and params:
+            out.append(_clamped(params, final))
+        else:
+            out.append(text[esc : end + 1])
     return "".join(out)
+
+
+def _clamped(params, final):
+    # CSI row;col H/f, CSI row d, CSI col G with every value inside the screen
+    if "?" in params:
+        return ""
+    parts = params.split(";")
+    if final in "Hf":
+        limits = (_TERM_ROWS - 1, _TERM_COLS)
+    elif final == "G":
+        limits = (_TERM_COLS,)
+    else:
+        limits = (_TERM_ROWS - 1,)
+    fixed = []
+    for k, top in enumerate(limits):
+        raw = parts[k] if k < len(parts) else ""
+        try:
+            value = int(raw) if raw else 1
+        except ValueError:
+            value = 1
+        fixed.append(str(max(1, min(top, value))))
+    return "\x1b[" + ";".join(fixed) + final
 
 
 class _ScreenTerm(_IOBase):
@@ -251,7 +279,14 @@ class _ScreenTerm(_IOBase):
             con = _CONSOLE[0]
             if con is not None and con.beam is None:
                 _show_cursor()  # input() reads: the console's cursor
-            return self._term.readinto(buf)
+            n = self._term.readinto(buf)
+            if n:
+                # typing at the REPL or into input() is activity too: it
+                # wakes the screen (that key still goes to the reader)
+                _IDLE[0] = ticks_ms()
+                if _OFF[0] is not None or _DIM[0] is not None:
+                    screen_on()
+            return n
         except KeyboardInterrupt:
             buf[0] = 3
             return 1
@@ -687,7 +722,8 @@ def _key_byte(timeout_ms=None):
             if _awake(byte, now):
                 return byte
             continue  # that key only woke the screen, or switched it off
-        if ticks_diff(now, _IDLE[1]) >= SERVICE_MS:
+        since = ticks_diff(now, _IDLE[1])
+        if since >= SERVICE_MS or since < 0:
             _IDLE[1] = now
             _services(now, timeout_ms != 0)
         if timeout_ms is not None and ticks_diff(now, start) >= timeout_ms:
@@ -1197,7 +1233,8 @@ def net_error(error):
             return _NET_ERRORS[args[0]]
         if len(args) > 1:
             text = args[1]  # mbedtls: (code, text)
-    return clip(text, DISPLAY_WIDTH - 6) or type(error).__name__
+    # the message can carry a server's words (a redirect's scheme): cleaned
+    return clean(clip(text, DISPLAY_WIDTH - 6)) or type(error).__name__
 
 
 # ── time ────────────────────────────────────────
@@ -1406,9 +1443,18 @@ def remove_service(fn):
         _HOOKS.remove(fn)
 
 
+def activity():
+    """Count now as the last key: idle time starts again (the launcher, at
+    start, after the REPL)."""
+    _IDLE[0] = ticks_ms()
+
+
 def _services(now, waiting):
     current = settings()
     idle = ticks_diff(now, _IDLE[0])
+    if idle < 0:  # ticks wrapped (2**30 ms, 12 days: ~6 days back reads negative)
+        _IDLE[0] = now
+        idle = 0
     off = _OFF[0]
     if off is None:
         if current["sleep_s"] > 0 and idle >= current["sleep_s"] * 1000:
@@ -1458,16 +1504,18 @@ def _drain():
 
 
 def _dim():
+    # Done once until the next key, even when there is nothing to lower (the
+    # level is 1 already, or no MCU answers): each read waits 16 ms.
     level = backlight()
+    _DIM[0] = level if level is not None else 0
     if level is not None and level > DIM_LEVEL:
-        _DIM[0] = level
         backlight(DIM_LEVEL)
 
 
 def _undim():
     level = _DIM[0]
     _DIM[0] = None
-    if level is not None:
+    if level and level > DIM_LEVEL:
         backlight(level)
 
 
@@ -1478,7 +1526,7 @@ def screen_off():
     keeps playing. Any key switches it back on and does nothing else."""
     if _OFF[0] is not None:
         return
-    level = _DIM[0] if _DIM[0] is not None else backlight()
+    level = _DIM[0] if _DIM[0] else backlight()
     _DIM[0] = None
     keys = keyboard_light()
     palette = None

@@ -94,12 +94,21 @@ def test_safe_csi_guards_the_terminal():
     last = pu._TERM_ROWS - 1
     check("margins dropped", pu._safe_csi("a\x1b[rb\x1b[1;40rc"), "abc")
     check("row clamped", pu._safe_csi("\x1b[99;5H"), "\x1b[{};5H".format(last))
-    check("f clamped", pu._safe_csi("\x1b[99f"), "\x1b[{}f".format(last))
+    check("f clamped", pu._safe_csi("\x1b[99f"), "\x1b[{};1f".format(last))
+    cols = pu._TERM_COLS
+    check("row 0", pu._safe_csi("a\x1b[0;1fb"), "a\x1b[1;1fb")
+    check("empty row", pu._safe_csi("\x1b[;5H"), "\x1b[1;5H")
+    check("column 0", pu._safe_csi("\x1b[5;0H"), "\x1b[5;1H")
+    check("column past the edge", pu._safe_csi("\x1b[99G"), "\x1b[{}G".format(cols))
+    check("other escapes dropped", pu._safe_csi("a\x1b7b\x1bDc\x1bMd"), "abcd")
+    check("lone ESC dropped", pu._safe_csi("end\x1b"), "end")
+    check("too many parameters", pu._safe_csi("a\x1b[;;;;;;;;;;;;;7mb\x1b[38;5;11mc"), "ab\x1b[38;5;11mc")
+    check("ESC ESC c", pu._safe_csi("\x1b\x1bcc"), "cc")
     check("vpa clamped", pu._safe_csi("x\x1b[99dy"), "x\x1b[{}dy".format(last))
     check("home kept", pu._safe_csi("\x1b[2J\x1b[H"), "\x1b[2J\x1b[H")
     check("colours kept", pu._safe_csi("\x1b[38;5;11mX\x1b[0m"), "\x1b[38;5;11mX\x1b[0m")
     check("private kept", pu._safe_csi("\x1b[?25l"), "\x1b[?25l")
-    check("cut sequence kept", pu._safe_csi("ab\x1b[12"), "ab\x1b[12")
+    check("cut sequence dropped", pu._safe_csi("ab\x1b[12"), "ab")
     check("safe row kept", pu._safe_csi("\x1b[3;1Hx"), "\x1b[3;1Hx")
     check("terminal reset dropped", pu._safe_csi("a\x1bcb"), "ab")
     vt = FakeVt()
@@ -274,6 +283,36 @@ def test_settings_app_power_cycle():
     restarts = []
     app.wait_power_cycle(lambda: answers.pop(0), lambda: restarts.append(1), lambda: None)
     check("restart once back on", (restarts, answers), ([1], []))
+
+
+
+class KeyTerm:
+    # the firmware terminal as input() reads it: one byte, then nothing
+    def __init__(self):
+        self.keys = [104]
+
+    def readinto(self, buf):
+        if not self.keys:
+            return None
+        buf[0] = self.keys.pop(0)
+        return 1
+
+
+def test_typing_is_activity():
+    mcu = FakeMcu()
+
+    def body(fake):
+        pu._IDLE[0] = pu.ticks_add(pu.ticks_ms(), -100000)
+        pu._DIM[0] = 5
+        mcu.regs[0x05] = 16
+        buf = bytearray(1)
+        check("the key goes to input()", (pu._ScreenTerm(KeyTerm()).readinto(buf), buf[0]), (1, 104))
+        check("idle restarts", pu.ticks_diff(pu.ticks_ms(), pu._IDLE[0]) < 1000, True)
+        check("undimmed", (pu._DIM[0], mcu.regs[0x05]), (None, 0x50))
+        pu.activity()
+        check("activity", pu.ticks_diff(pu.ticks_ms(), pu._IDLE[0]) < 1000, True)
+
+    with_pico(body, keyboard=mcu)
 
 
 run(globals())

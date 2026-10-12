@@ -349,7 +349,9 @@ def view(index=1):
 def _iter_lines(raw):
     # Lines from a response body read in small chunks (no whole-body buffer).
     # One line is capped: a body with no newline grew until MemoryError.
-    buf = bytearray(256)
+    # 64 bytes a read: a socket read waits for its whole buffer, so q/Esc
+    # and the time cap act between reads of keep-alive comments too
+    buf = bytearray(64)
     view = memoryview(buf)
     pending = bytearray()
     while True:
@@ -388,7 +390,7 @@ def _delta_text(event):
 def _error_text(err):
     if isinstance(err, dict):
         err = err.get("message", str(err))
-    return _clip(err, 80)
+    return _clip(_clean(str(err)), 80)  # the server's words
 
 
 class _StreamPrinter:

@@ -102,6 +102,18 @@ def _get_location():
     return lat, lon, name
 
 
+def _scrub(value):
+    # Every string of a server's answer without control characters: names,
+    # times and codes are printed (an ESC would drive the screen terminal).
+    if isinstance(value, str):
+        return _clean(value)
+    if isinstance(value, list):
+        return [_scrub(item) for item in value]
+    if isinstance(value, dict):
+        return dict((key, _scrub(item)) for key, item in value.items())
+    return value
+
+
 def _location_label(name, lat, lon):
     if name:
         return _clip(name, 20)
@@ -180,7 +192,7 @@ def set_city(name):
         if status != 200:
             print("HTTP:", status)
             return False
-        data = response.json()
+        data = _scrub(response.json())
     except Exception as e:
         print("Err:", _net_error(e))
         return False
@@ -267,7 +279,7 @@ def _fetch(days):
         if status != 200:
             print("HTTP:", status)
             return None
-        data = response.json()
+        data = _scrub(response.json())
     except Exception as e:
         print("Err:", _net_error(e))
         return None

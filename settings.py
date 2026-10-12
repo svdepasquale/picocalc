@@ -139,7 +139,9 @@ def switch_off():
     if _usb_powered():
         print(_paint("USB power: the Pico stays on. Switch the", GREY))
         print(_paint("PicoCalc on again and it restarts.", GREY))
-        wait_power_cycle()
+    # on battery the power goes before this returns; on USB the Pico restarts
+    # once the PicoCalc is on again (the panel needs setting up)
+    wait_power_cycle()
     return True
 
 

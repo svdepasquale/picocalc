@@ -623,7 +623,7 @@ def _fetch_feed(name, url, per_feed, requests):
         xml_text = _read_body(response, buf)
         del buf
     except Exception as error:
-        print("Fetch err:", _clip(error, 24))
+        print("Fetch err:", _clip(_clean(str(error)), 24))
         return []
     finally:
         if response is not None:
@@ -812,8 +812,8 @@ def _mf_items(data):
             {
                 "title": _clean_text(entry.get("title", ""), MAX_TITLE_CHARS, html=False),
                 "summary": _clean_text(content, MAX_SUMMARY_CHARS),
-                "link": str(entry.get("url", "")),
-                "date": str(entry.get("published_at", ""))[:16].replace("T", " "),
+                "link": _clean_text(str(entry.get("url", "")), 220, html=False),
+                "date": _clean(str(entry.get("published_at", "")))[:16].replace("T", " "),
                 "source": _clean_text(source or "Miniflux", 28),
                 "mf_id": entry.get("id"),
             }
@@ -887,7 +887,7 @@ def mf(limit=MF_LIMIT):
             print("Out of memory.")
             return 0
         except Exception as error:
-            print("Fetch err:", _clip(error, 24))
+            print("Fetch err:", _clip(_clean(str(error)), 24))
             return 0
         if status == 401:
             print("Miniflux: bad API key (not retrying).")
@@ -910,6 +910,7 @@ def mf(limit=MF_LIMIT):
         print("Out of memory.")
         return 0
     total = data.get("total", 0) if isinstance(data, dict) else 0
+    total = total if isinstance(total, int) else 0
     del data
     gc.collect()
     if not items:
@@ -945,7 +946,7 @@ def mf_done():
         )
         status = response.status_code
     except Exception as error:
-        print("Err:", _clip(error, 24))
+        print("Err:", _clip(_clean(str(error)), 24))
         return False
     finally:
         if response is not None:
