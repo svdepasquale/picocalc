@@ -123,6 +123,29 @@ def _with_ai(config, body):
     return out
 
 
+def test_ai_json_reply_widths_and_one_pager():
+    # a server that ignores "stream": true answers JSON: its text was lost
+    reply = HttpResponse(200, b'{"choices":[{"message":{"content":"plain"}}]}')
+    reply.headers = {"Content-Type": "application/json"}
+    req = ScriptedRequests([reply])
+
+    def run():
+        ai._http_module = lambda: req
+        check("JSON reply with stream on", ai.ask("q"), "plain")
+
+    _with_ai({"api_key": "k"}, run)
+    got = []
+    body = 'data: {"choices":[{"delta":{"content":"5\u20ac\\tok\u2026"}}]}\n\n'.encode()
+    check("drawn widths", ai._sse_text(ChunkRaw(body), got.append), "5EUR    ok...")
+    shown = []
+    saved = swap(ai, {"_paged_lines": shown.extend, "_screen_header": lambda *args: None})
+    try:
+        ai._render_response_detail({"model": "m", "elapsed_ms": 7, "prompt": "q?", "answer": "a."}, 0, 1)
+    finally:
+        unswap(ai, saved)
+    check("detail: one pager", shown, ["[1/1] m", "ms: 7", "Q:", "q?", "---", "A:", "a."])
+
+
 def test_ai_body_is_utf8_bytes():
     # requests sends len(data) as Content-Length: a str counts characters,
     # and MicroPython's json writes accents as raw UTF-8
