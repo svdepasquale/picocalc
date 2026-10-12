@@ -170,7 +170,7 @@ def _draw(fb, state, best):
     if state["food"] is not None:
         _food(fb, state["food"])
     _status(fb, state["score"], best)
-    games.gfx.key_bar(_KEYS, 180, _STATUS_Y)
+    games.gfx.key_bar(_KEYS, 320 - games._keys_width(_KEYS) - 4, _STATUS_Y)
 
 
 _KEYS = tuple((games.gfx.cp(k), games.gfx.cp(v)) for k, v in (("p", "pause"), ("m", "sound"), ("q", "quit")))
