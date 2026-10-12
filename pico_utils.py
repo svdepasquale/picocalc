@@ -8,12 +8,17 @@ try:
 except ImportError:
     import json
 
+try:  # here, not in sort_by(): an import in a function costs ~7 ms a call on the device
+    from random import getrandbits as _getrandbits
+except ImportError:
+    _getrandbits = None
+
 
 HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.3"
+MODULE_VERSION = "2026-10-12.4"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -657,13 +662,9 @@ def sort_by(items, key=None):
         decorated = [(item, i, item) for i, item in enumerate(items)]
     else:
         decorated = [(key(item), i, item) for i, item in enumerate(items)]
-    try:
-        from random import getrandbits
-    except ImportError:
-        getrandbits = None
-    if getrandbits is not None:
+    if _getrandbits is not None:
         for i in range(len(decorated) - 1, 0, -1):
-            j = getrandbits(16) % (i + 1)
+            j = _getrandbits(16) % (i + 1)
             decorated[i], decorated[j] = decorated[j], decorated[i]
     decorated.sort()
     return [entry[2] for entry in decorated]
