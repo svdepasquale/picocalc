@@ -61,14 +61,22 @@ class FakePico:
 
 
 def with_pico(body, display=None, keyboard=None, lut=None):
+    # The body runs with no services and the settings file in tests/: on the
+    # device the launcher's Wi-Fi join was still a service when a test ran
+    # _services() with its own settings in memory, and the join saved them
+    # (wifi_last) into the real settings.json: dim after 1 s, never off
+    # (2026-10-12).
     fake = FakePico()
     fake.display = display
     fake.keyboard = keyboard
     saved = (sys.modules.get("picocalc"), sys.modules.get("picocalcdisplay"))
-    saved_state = (pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0], list(pu._HOOKS))
+    saved_state = (pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0], list(pu._HOOKS), pu._TICK[0], pu.SETTINGS_FILE)
     sys.modules["picocalc"] = fake
     if lut is not None:
         sys.modules["picocalcdisplay"] = lut
+    pu._HOOKS[:] = []
+    pu._TICK[0] = None
+    pu.SETTINGS_FILE = TMP
     try:
         body(fake)
     finally:
@@ -79,6 +87,8 @@ def with_pico(body, display=None, keyboard=None, lut=None):
                 sys.modules[name] = module
         pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0] = saved_state[:4]
         pu._HOOKS[:] = saved_state[4]
+        pu._TICK[0], pu.SETTINGS_FILE = saved_state[5:]
+        rm_tmp(TMP)
 
 
 def test_clean_drops_controls():
@@ -245,6 +255,31 @@ def test_services_run_and_drop():
         check("dropped", (hook in pu._HOOKS, boom in pu._HOOKS), (False, False))
 
     with_pico(body)
+
+
+def test_outside_services_stay_out_of_tests():
+    # the launcher's Wi-Fi join, still a service at the REPL after a test run
+    # took over, saved a test's settings in the device's settings.json
+    ran = []
+
+    def join(now, waiting):
+        ran.append(1)
+        pu.set_setting("wifi_last", "x")
+        return False
+
+    def body(fake):
+        pu._SETTINGS[0] = dict(pu.SETTINGS_DEFAULTS, dim_s=1, sleep_s=0)
+        pu._services(pu.ticks_ms(), True)
+        check("a test saves in tests/", pu.SETTINGS_FILE, TMP)
+
+    real = pu.SETTINGS_FILE
+    pu.add_service(join)
+    try:
+        with_pico(body)
+        check("not run inside", ran, [])
+        check("file back", pu.SETTINGS_FILE, real)
+    finally:
+        pu.remove_service(join)
 
 
 
