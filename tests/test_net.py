@@ -595,6 +595,40 @@ def test_wifi_says_why():
     check("connected screen", got["out"], ["WiFi: connected", "SSID: home", "IP: 10.0.0.7"])
 
 
+class LateWlan(FakeWlan):
+    # status() first reads `first` after connect(): the last try's failure
+    # (traced on the device), or 2 (joined, no address yet) for a while
+    def __init__(self, items, reach, first):
+        FakeWlan.__init__(self, items, reach)
+        self.first = first
+
+    def connect(self, ssid, key):
+        FakeWlan.connect(self, ssid, key)
+        self.readings = list(self.first)
+
+    def status(self):
+        return self.readings.pop(0) if self.readings else self.state
+
+
+def test_wifi_waits_out_stale_and_slow_statuses():
+    stale = LateWlan([_scan_item(b"home", -50)], {"home": 3}, [-3, -3])
+
+    def saved():
+        check("stale 'wrong password' waited out", wifi_manager.connect_saved_networks(stale, {"home": "p1"}), True)
+
+    got = _with_wifi(stale, saved)
+    check("one try", stale.joins, [("home", "p1")])
+    slow = LateWlan([_scan_item(b"cafe", -50)], {"cafe": 3}, [2] * 20)  # 2 past the 8 s
+
+    def chosen():
+        check("slow address: joined", wifi_manager.auto_connect_or_prompt(), True)
+        check("and its key saved", wifi_manager.load_credentials(), {"cafe": "pw"})
+
+    _with_wifi(slow, chosen, keys=["1"], line="pw")
+    spaced = FakeWlan([_scan_item(b" Cafe ", -50)])
+    check("spaces kept in a name", wifi_manager.scan_networks(spaced)[0][0], " Cafe ")
+
+
 def test_wifi_open_networks_and_nine():
     items = [_scan_item("net{}".format(i).encode(), -50 - i) for i in range(12)]
     items.append(_scan_item(b"cafe", -40, auth=0))

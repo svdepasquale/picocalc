@@ -24,7 +24,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-12.1"
+WIFI_MANAGER_VERSION = "2026-10-12.2"
 _NETWORK_MODULE = None
 
 # wlan.status() in words, for the WiFi screen and failed connects: the rp2
@@ -116,7 +116,7 @@ def scan_networks(wlan):
     seen = set()
 
     for item in results:
-        ssid = _decode_ssid(item[0]).strip()
+        ssid = _decode_ssid(item[0])  # whole: spaces can be part of a name
         rssi = item[3]
 
         if not ssid or ssid in seen:
@@ -144,14 +144,24 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
     timeout_ms = int(timeout * 1000)
     start = _ticks_ms()
 
-    while _ticks_diff(_ticks_ms(), start) < timeout_ms:
+    while True:
         status = wlan.status()
+        waited = _ticks_diff(_ticks_ms(), start)
 
         if status == network.STAT_GOT_IP:
             return status
 
-        if status in (network.STAT_WRONG_PASSWORD, network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL):
+        # As in the background join (_join_service): right after connect()
+        # the status can still be the last try's failure, so a failure
+        # counts after the grace time; and 'wrong password' after an abrupt
+        # reset passed (traced on the device), so it counts at the timeout.
+        if status in (network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL) and waited > JOIN_GRACE_MS:
             return status
+
+        if waited >= timeout_ms:
+            # 2: joined, the key taken, the address on its way: a little more
+            if status != 2 or waited >= JOIN_TIMEOUT_MS:
+                return status
 
         if _poll_key() in ("q", "Q", "esc"):
             wlan.disconnect()
@@ -159,8 +169,6 @@ def connect_to_wifi(wlan, ssid, password, timeout=CONNECT_TIMEOUT_SECONDS):
             return None
 
         _sleep_ms(CONNECT_POLL_INTERVAL_MS)
-
-    return wlan.status()
 
 
 def get_connection_status():
