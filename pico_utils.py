@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -1331,6 +1331,8 @@ def set_tick(fn):
     removes it. For work that cannot wait SERVICE_MS: the music in the
     background. It must not raise, and must be short."""
     _TICK[0] = fn
+
+
 OFF_POLL_MS = 100  # key poll period while the screen is off
 DIM_LEVEL = 1  # backlight while dimmed
 WIFI_SLEEP_MS = 60000  # screen off this long in a key wait: Wi-Fi off too
@@ -1354,6 +1356,14 @@ def add_service(fn):
 def remove_service(fn):
     if fn in _HOOKS:
         _HOOKS.remove(fn)
+
+
+def background_work():
+    """What key waits run besides the keys: the services and the tick."""
+    work = list(_HOOKS)
+    if _TICK[0] is not None:
+        work.append(_TICK[0])
+    return work
 
 
 def activity():

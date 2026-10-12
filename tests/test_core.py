@@ -335,6 +335,38 @@ def test_menu_imports():
     check("logo below the panel", menu._logo_top() > menu._PANEL_Y + menu._PANEL_H, True)
 
 
+def test_menu_unload_spares_background_work():
+    # Low on memory, the launcher unloads idle apps before opening another,
+    # but not one whose service or tick runs: a new import would be a second
+    # copy, and the first one's Wi-Fi join went on switching networks.
+    import menu
+
+    class Mod:
+        pass
+
+    idle, busy, ticking = Mod(), Mod(), Mod()
+    busy.service = lambda now, waiting: True
+    ticking.tick = lambda: None
+    names = ("_t_idle", "_t_busy", "_t_tick")
+    for name, mod in zip(names, (idle, busy, ticking)):
+        sys.modules[name] = mod
+    saved = swap(menu, {"_APP_MODULES": names + ("_t_new",), "_mem_free": lambda: 0})
+    pu.add_service(busy.service)
+    pu.set_tick(ticking.tick)
+    try:
+        try:
+            menu._load("_t_new")
+        except ImportError:
+            pass  # no such module: only the unloading matters here
+        check("idle unloaded, working kept", [n in sys.modules for n in names], [False, True, True])
+    finally:
+        pu.remove_service(busy.service)
+        pu.set_tick(None)
+        unswap(menu, saved)
+        for name in names:
+            sys.modules.pop(name, None)
+
+
 def test_go_run_or_imported():
     # Executed rather than imported (mpremote run go.py, r on /go.py in
     # Files), go was never in sys.modules: dropping itself must not raise.
