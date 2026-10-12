@@ -128,16 +128,38 @@ _ROOTS = (
 # ── URLs and policy ─────────────────────────────
 
 
+def _scheme(url):
+    # The scheme of an absolute URL ("https"), or None: letters, digits and
+    # "+-." before "://" (a Location like "/a?u=http://x" is relative).
+    at = url.find("://")
+    if at <= 0:
+        return None
+    for ch in url[:at]:
+        if not (ch.isalpha() or ch.isdigit() or ch in "+-."):
+            return None
+    return url[:at].lower()
+
+
 def split_url(url):
-    """(scheme, host, port, path) of an http(s) URL; path without its "/"."""
-    if "://" not in url:
-        raise ValueError("not a URL: " + url[:40])
-    scheme, rest = url.split("://", 1)
-    scheme = scheme.lower()
+    """(scheme, host, port, path) of an http(s) URL; path without its "/"
+    (the query stays in it)."""
+    scheme = _scheme(url)
+    if scheme is None:
+        raise ValueError("not a URL")
     if scheme not in ("http", "https"):
-        raise ValueError("unsupported scheme: " + scheme)
-    slash = rest.find("/")
-    hostport, path = (rest, "") if slash < 0 else (rest[:slash], rest[slash + 1 :])
+        # no server text in messages: they are printed (pico_utils.clean)
+        raise ValueError("unsupported scheme")
+    rest = url[len(scheme) + 3 :]
+    end = len(rest)
+    for mark in "/?#":
+        at = rest.find(mark)
+        if 0 <= at < end:
+            end = at
+    hostport = rest[:end]
+    path = rest[end + 1 :] if end < len(rest) and rest[end] == "/" else rest[end:]
+    if path.startswith("#"):
+        path = ""
+    path = path.split("#", 1)[0]
     port = 443 if scheme == "https" else 80
     if ":" in hostport:
         hostport, number = hostport.rsplit(":", 1)
@@ -149,7 +171,7 @@ def split_url(url):
 
 def join_url(base, location):
     """Where a redirect's Location points, from the URL that answered."""
-    if "://" in location:
+    if _scheme(location):
         return location
     scheme, host, port, path = split_url(base)
     default = 443 if scheme == "https" else 80
@@ -158,7 +180,10 @@ def join_url(base, location):
         return scheme + ":" + location
     if location.startswith("/"):
         return origin + location
-    folder = path.split("?", 1)[0].rsplit("/", 1)[0] if "/" in path else ""
+    plain = path.split("?", 1)[0]
+    if location.startswith("?"):
+        return origin + "/" + plain + location
+    folder = plain.rsplit("/", 1)[0] if "/" in plain else ""
     return origin + "/" + (folder + "/" if folder else "") + location
 
 
@@ -327,8 +352,10 @@ def read_body(raw, length, cap):
 
 def read_head(raw):
     """(status, reason, headers) from the stream; header names lowercase."""
-    line = raw.readline()
+    line = raw.readline(MAX_HEAD)  # capped: a line with no end would fill the heap
     used = len(line)
+    if not line.endswith(b"\n"):
+        raise ValueError("response head too big")
     parts = line.split(None, 2)
     if len(parts) < 2 or not parts[0].startswith(b"HTTP/"):
         raise ValueError("not an HTTP response")
@@ -339,12 +366,14 @@ def read_head(raw):
     reason = _text(parts[2].strip()) if len(parts) > 2 else ""
     headers = {}
     while True:
-        line = raw.readline()
+        line = raw.readline(MAX_HEAD - used + 1)
         used += len(line)
         if used > MAX_HEAD or len(headers) > 60:
             raise ValueError("response head too big")
         if not line or line in (b"\r\n", b"\n"):
             break
+        if not line.endswith(b"\n"):
+            raise ValueError("response head too big")
         colon = line.find(b":")
         if colon > 0:
             headers[_text(line[:colon]).strip().lower()] = _text(line[colon + 1 :]).strip()
@@ -412,7 +441,8 @@ def request(method, url, data=None, json=None, headers=None, timeout=TIMEOUT, ve
             break
         new_url = join_url(url, location)
         headers = redirect_headers(headers, url, new_url)
-        if status == 303 or (status in (301, 302) and method not in ("GET", "HEAD")):
+        # 303 turns anything but GET/HEAD into GET; 301/302 only POST (as browsers)
+        if (status == 303 and method not in ("GET", "HEAD")) or (status in (301, 302) and method == "POST"):
             method, body = "GET", None
             headers = dict((k, v) for k, v in headers.items() if k.lower() != "content-type")
         url = new_url

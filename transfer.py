@@ -14,7 +14,7 @@ from pico_utils import check_wifi as _check_wifi, clean as _clean, clip as _clip
 from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
 from pico_utils import paint as _paint, poll_key as _poll_key
 from pico_utils import screen_header as _screen_header, ticks_diff as _ticks_diff
-from pico_utils import ticks_ms as _ticks_ms, wait_key as _wait_key
+from pico_utils import ticks_add as _ticks_add, ticks_ms as _ticks_ms, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 try:
@@ -29,10 +29,12 @@ SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024
 MAX_HEAD = 4096  # request line and headers
 MAX_HEADERS = 30
-MAX_NAME = 64
+MAX_NAME = 255  # FAT's longest name
 MAX_LIST = 400  # files listed per folder
 CHUNK = 4096
-RECV_TIMEOUT = 10  # seconds a connected client may stay silent
+WAIT = 0.25  # seconds per socket wait: q/Esc and the deadlines are checked between
+HEAD_MS = 10000  # a request head must arrive whole within this
+IDLE_MS = 10000  # a transfer may stall this long
 ACCEPT_WAIT = 0.25  # seconds per accept(): q/Esc is read in between
 MAX_STRIKES = 10  # wrong PINs before the server closes
 SD_FAST = 8000000  # SPI clock while serving: 214 KB/s measured, 89 KB/s at the default
@@ -202,6 +204,92 @@ def read_head(conn):
     return method, path, query, headers
 
 
+# ── the client connection ───────────────────────
+
+
+def _timed_out(error):
+    # a socket wait that ran out: lwIP's ETIMEDOUT/EAGAIN, CPython's message
+    code = error.args[0] if error.args else None
+    return code in (110, 11) or code == "timed out"
+
+
+class _Client:
+    # The accepted socket, read and written in short waits: q/Esc acts (and
+    # closes the server) while a client is connected, a request head must
+    # arrive within HEAD_MS and no transfer may stall IDLE_MS. A client that
+    # trickled bytes kept the server, and the keys, for hours.
+    def __init__(self, sock, state):
+        self.sock = sock
+        self.state = state
+        self.pending = b""
+        self.head_by = _ticks_add(_ticks_ms(), HEAD_MS)
+        sock.settimeout(WAIT)
+
+    def _wait(self, since):
+        if self.state["abort"]():
+            self.state["stop"] = ""
+            raise OSError("stopped")
+        now = _ticks_ms()
+        if self.head_by is not None and _ticks_diff(now, self.head_by) > 0:
+            raise OSError("request too slow")
+        if _ticks_diff(now, since) > IDLE_MS:
+            raise OSError("client too slow")
+
+    def _recv(self, n):
+        since = _ticks_ms()
+        while True:
+            try:
+                return self.sock.recv(n)
+            except OSError as error:
+                if not _timed_out(error):
+                    raise
+            self._wait(since)
+
+    def head_done(self):
+        self.head_by = None
+
+    def readline(self, limit):
+        while True:
+            nl = self.pending.find(b"\n")
+            if nl >= 0 or len(self.pending) >= limit:
+                end = min(nl + 1 if nl >= 0 else limit, limit)
+                line, self.pending = self.pending[:end], self.pending[end:]
+                return line
+            chunk = self._recv(512)
+            if not chunk:
+                line, self.pending = self.pending, b""
+                return line
+            self.pending += chunk
+
+    def readinto(self, view):
+        # what has come, up to len(view): b"" (0) when the client closed
+        if self.pending:
+            n = min(len(view), len(self.pending))
+            view[:n] = self.pending[:n]
+            self.pending = self.pending[n:]
+            return n
+        chunk = self._recv(len(view))
+        view[: len(chunk)] = chunk
+        return len(chunk)
+
+    def write(self, data):
+        view = memoryview(data)
+        since = _ticks_ms()
+        while len(view):
+            try:
+                n = self.sock.send(view)
+            except OSError as error:
+                if not _timed_out(error):
+                    raise
+                n = 0
+            if n:
+                view = view[n:]
+                since = _ticks_ms()
+            else:
+                self._wait(since)
+        return len(data)
+
+
 # ── responses ───────────────────────────────────
 
 
@@ -255,6 +343,8 @@ def handle(conn, state):
     req = read_head(conn)
     if req is None:
         return _error(conn, 400, "bad request")
+    if hasattr(conn, "head_done"):
+        conn.head_done()
     method, path, query, headers = req
     if path == "/" and method == "GET":
         return _send(
@@ -322,6 +412,7 @@ def _download(conn, state, target, name):
             conn.write(view[:n])
             sent += n
             if state["abort"]():
+                state["stop"] = ""  # q closes the server, not just this file
                 break
     _log(state, "sent {} {}".format(name, _rate(sent, started)))
     return 200
@@ -351,6 +442,7 @@ def _upload(conn, state, headers, target, name):
                 f.write(view[:n])
                 left -= n
                 if state["abort"]():
+                    state["stop"] = ""  # q closes the server, not just this file
                     raise OSError("stopped")
         try:
             os.remove(target)  # a FAT rename never replaces a file
@@ -466,8 +558,7 @@ def serve(port=PORT, root=SD_ROOT):
             except OSError:  # the accept wait ran out
                 continue
             try:
-                conn.settimeout(RECV_TIMEOUT)
-                handle(conn, state)
+                handle(_Client(conn, state), state)
             except OSError as error:
                 _log(state, "dropped: {}".format(error))
             finally:

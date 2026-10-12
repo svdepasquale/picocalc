@@ -65,6 +65,7 @@ fi
 build=$(mktemp -d "${TMPDIR:-/tmp}/picocalc_build.XXXXXX")
 trap 'rm -rf "$build"' EXIT
 sent=
+moves=
 stale=
 for file in $files; do
   name=$(basename "$file" .py)
@@ -78,13 +79,18 @@ for file in $files; do
     main | go | default_style) keep=1 ;;
     *) keep=$source_only ;;
   esac
+  # Each file lands as name.part and is renamed once every copy is through:
+  # a copy cut short leaves the old module whole (a truncated .mpy made the
+  # import spin forever in C, at every power-on).
   if [ -n "$keep" ]; then
-    cp "$file" "$build/$name.py"
-    sent="$sent $build/$name.py"
+    cp "$file" "$build/$name.py.part"
+    sent="$sent $build/$name.py.part"
+    moves="$moves ('$name.py.part', '$name.py'),"
     stale="$stale '$name.mpy',"
   else
-    mpy-cross -march="$arch" -o "$build/$name.mpy" "$file"
-    sent="$sent $build/$name.mpy"
+    mpy-cross -march="$arch" -o "$build/$name.mpy.part" "$file"
+    sent="$sent $build/$name.mpy.part"
+    moves="$moves ('$name.mpy.part', '$name.mpy'),"
     stale="$stale '$name.py',"
   fi
 done
@@ -108,6 +114,8 @@ picocalc.display.stopRefresh()
 mp cp $sent :
 mp exec "
 import os
+for part, name in [$moves]:
+    os.rename(part, name)  # littlefs replaces the old file in one step
 for n in [$stale]:
     try:
         os.remove(n)
@@ -115,4 +123,4 @@ for n in [$stale]:
         pass
 "
 mp exec "import machine; machine.reset()" || true  # the USB link drops on reset
-echo "deployed:$(for f in $sent; do printf ' %s' "$(basename "$f")"; done)"
+echo "deployed:$(for f in $sent; do printf ' %s' "$(basename "$f" .part)"; done)"

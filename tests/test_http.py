@@ -19,9 +19,11 @@ class FakeConn:
         self.sent += bytes(data)
         return len(data)
 
-    def readline(self):
+    def readline(self, limit=-1):
         nl = self.data.find(b"\n", self.pos)
         end = len(self.data) if nl < 0 else nl + 1
+        if limit >= 0:
+            end = min(end, self.pos + limit)
         line = self.data[self.pos : end]
         self.pos = end
         return line
@@ -126,6 +128,13 @@ def test_redirects():
 
     serve([answer(302, [("Location", "/x")])] * 4, loop)
 
+    def put_moved(conns):
+        pico_net.put("https://feed.example.com/v1/entries", data=b"{}", headers={"X-Auth-Token": "k"})
+        check("PUT stays PUT on 301", conns[1].sent.split(b"\r\n")[0], b"PUT /v1/entries/ HTTP/1.0")
+        check("with its body", conns[1].sent.endswith(b"\r\n\r\n{}"), True)
+
+    serve([answer(301, [("Location", "/v1/entries/")]), answer(200)], put_moved)
+
 
 def test_join_url():
     base = "https://h.example.com:8443/a/b?c=1"
@@ -135,6 +144,17 @@ def test_join_url():
     check("relative", pico_net.join_url(base, "d"), "https://h.example.com:8443/a/d")
     check("default port", pico_net.join_url("http://h.org/x", "/y"), "http://h.org/y")
     check("split", pico_net.split_url("https://H.Org:444/p"), ("https", "h.org", 444, "p"))
+    check("query in a relative Location", pico_net.join_url("https://n.org/feed", "/consent?continue=https://n.org/feed"), "https://n.org/consent?continue=https://n.org/feed")
+    check("query-only", pico_net.join_url("https://n.org/dir/page?x=1", "?page=2"), "https://n.org/dir/page?page=2")
+    check("slash in the query", pico_net.join_url("https://n.org/rss?u=/a/b", "other.xml"), "https://n.org/other.xml")
+    check("host ends at ?", pico_net.split_url("https://h.org?x=1"), ("https", "h.org", 443, "?x=1"))
+    check("fragment dropped", pico_net.split_url("http://h.org/a#top"), ("http", "h.org", 80, "a"))
+    try:
+        pico_net.split_url("\x1bc://x/")
+        got = "parsed"
+    except ValueError as error:
+        got = str(error)
+    check("no server text in errors", got, "not a URL")
 
 
 def test_caps_and_refusals():

@@ -60,9 +60,9 @@ def ask(state, text, body=b"", stall=False):
 
 
 def test_names_and_decoding():
-    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 64):
+    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 65, "b" * 255):
         check("ok " + name[:10], transfer.valid_name(name), True)
-    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * 65, None):
+    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * 256, None):
         check("bad " + repr(name)[:12], transfer.valid_name(name), False)
     check("percent", transfer.unquote("a%20b+c%C3%A8"), "a b c\xe8")
     check("broken percent kept", transfer.unquote("100%x%4"), "100%x%4")
@@ -151,6 +151,67 @@ def test_uploads():
         check("logged", state["log"][0].startswith("got new.bin"), True)
     finally:
         rm_tree(ROOT)
+
+
+
+class SlowSocket:
+    # a real socket's side as _Client sees it: recv() times out between
+    # the pieces a client sends; send() takes a little at a time
+    def __init__(self, pieces, gap_ms=0):
+        self.pieces = list(pieces)
+        self.sent = b""
+        self.timeouts = 0
+
+    def settimeout(self, seconds):
+        self.wait = seconds
+
+    def recv(self, n):
+        if not self.pieces:
+            return b""
+        piece = self.pieces.pop(0)
+        if piece is None:
+            self.timeouts += 1
+            raise OSError(110)  # ETIMEDOUT, as lwIP says it
+        self.pieces.insert(0, piece[n:]) if len(piece) > n else None
+        return piece[:n]
+
+    def send(self, data):
+        self.sent += bytes(data[:7])
+        return min(7, len(data))
+
+
+def test_client_waits_and_deadlines():
+    state = new_state()
+    clock = [0]
+    saved = transfer._ticks_ms
+    transfer._ticks_ms = lambda: clock[0]
+    try:
+        sock = SlowSocket([b"GET /api/ls HTTP/1.1\r\nX-PIN: 1", None, None, b"23456\r\n\r\nbody"])
+        client = transfer._Client(sock, state)
+        check("short waits", sock.wait, transfer.WAIT)
+        got = transfer.read_head(client)
+        check("head across waits", (got[0], got[3]["x-pin"], sock.timeouts), ("GET", "123456", 2))
+        view = memoryview(bytearray(10))
+        check("the rest after the head", (client.readinto(view), bytes(view[:4])), (4, b"body"))
+        check("write in pieces", (client.write(b"0123456789abcdef"), sock.sent), (16, b"0123456789abcdef"))
+        slow = transfer._Client(SlowSocket([b"GET / HT"] + [None] * 100), state)
+        clock[0] += transfer.HEAD_MS + 1
+        try:
+            transfer.read_head(slow)
+            got = "read"
+        except OSError as error:
+            got = str(error)
+        check("a trickled head is dropped", got, "request too slow")
+        state["abort"] = lambda: True
+        quit = transfer._Client(SlowSocket([None, b"x"]), state)
+        try:
+            quit.readinto(memoryview(bytearray(4)))
+            got = "read"
+        except OSError as error:
+            got = str(error)
+        check("q while a client waits", (got, state["stop"]), ("stopped", ""))
+    finally:
+        transfer._ticks_ms = saved
 
 
 run(globals())
