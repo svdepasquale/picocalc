@@ -362,10 +362,15 @@ def _sync_clock():
 # with no scan (one blocks for ~2 s); once joined, the clock is set quietly.
 
 JOIN_TIMEOUT_MS = 12000  # per network
-JOIN_ROUNDS = 2  # passes over the saved networks
-JOIN_ROUND_GAP_MS = 20000  # between passes
+JOIN_WARMUP_MS = 2000  # radio power-up to the first scan (0.8 s missed the AP more often)
+JOIN_GRACE_MS = 1500  # after connect() the link status still shows the last try's failure
+JOIN_ROUNDS = 5  # passes over the saved networks, about a minute in all
+JOIN_ROUND_GAP_MS = 4000  # before pass 2; each later gap is that much longer
+# (measured over 16 resets: a pass right after power-up missed the network in
+# one boot in four; a scan and a connect 20 s later always joined)
 NTP_RETRY_MS = 30000
 _JOIN = {}  # order, names: the pass; ssid, since: the try; round, wait: when to try
+LAST_JOIN = [None]  # (ticks_ms() when joined, pass) of the last background join
 _NTP = [0, 0]  # quiet NTP tries, ticks of the last
 
 
@@ -381,7 +386,7 @@ def start_join():
         wlan.active(True)
         # the radio's first scan right after power-up finds nothing (connect
         # scans): the service connects after the warm-up, the menu draws now
-        warm = WLAN_WARMUP_MS
+        warm = JOIN_WARMUP_MS
     if wlan.isconnected():
         _joined(None)
         return False
@@ -394,6 +399,7 @@ def start_join():
     _JOIN["names"] = order
     _JOIN["order"] = list(order)
     _JOIN["round"] = 1
+    _JOIN["scan"] = True
     _JOIN["wait"] = _ticks_add(_ticks_ms(), warm)
     _add_service(_join_service)
     return True
@@ -414,6 +420,15 @@ def _join_next(wlan, credentials):
     # Connect to the next saved network of this pass; at the end of a pass,
     # wait JOIN_ROUND_GAP_MS and start another (a network can be busy or out
     # of reach for a moment). False once the passes are over.
+    if _JOIN.get("scan"):
+        # One scan first in each pass (~0.7 s): seen on the device, connect()
+        # alone answered 'network not found' after one boot in four, pass
+        # after pass, and a connect right after a scan joined in 3 s.
+        _JOIN["scan"] = False
+        try:
+            wlan.scan()
+        except Exception:
+            pass
     while _JOIN.get("order"):
         ssid = _JOIN["order"].pop(0)
         if ssid not in credentials:
@@ -426,10 +441,11 @@ def _join_next(wlan, credentials):
         _JOIN["since"] = _ticks_ms()
         return True
     if _JOIN.get("round", JOIN_ROUNDS) < JOIN_ROUNDS and _JOIN.get("names"):
+        _JOIN["wait"] = _ticks_add(_ticks_ms(), JOIN_ROUND_GAP_MS * _JOIN["round"])
         _JOIN["round"] += 1
         _JOIN["order"] = list(_JOIN["names"])
+        _JOIN["scan"] = True
         _JOIN["ssid"] = None
-        _JOIN["wait"] = _ticks_add(_ticks_ms(), JOIN_ROUND_GAP_MS)
         return True
     _JOIN.clear()
     return False
@@ -441,6 +457,7 @@ def _join_service(now, waiting):
     wlan = _sta_wlan()
     if wlan.isconnected():
         ssid = _JOIN.get("ssid")
+        LAST_JOIN[0] = (now, _JOIN.get("round"))
         _JOIN.clear()
         _joined(ssid)
         return False
@@ -449,10 +466,14 @@ def _join_service(now, waiting):
             return True  # the radio warming up, or the gap between passes
         del _JOIN["wait"]
         return _join_next(wlan, load_credentials())
+    # A failure counts only after the grace time (traced on the device: right
+    # after connect() the status was still the last try's -3, so the next
+    # network looked failed at once), and 'wrong password' (-3) is no reason
+    # to give a network up: the home network answered it after an abrupt
+    # reset, while it still held the old association, and joined later.
     status = wlan.status()
-    if status == -3 and _JOIN.get("ssid") in _JOIN.get("names", ()):
-        _JOIN["names"].remove(_JOIN["ssid"])  # wrong password: not again
-    if status < 0 or _ticks_diff(now, _JOIN["since"]) > JOIN_TIMEOUT_MS:
+    tried = _ticks_diff(now, _JOIN["since"])
+    if (status < 0 and tried > JOIN_GRACE_MS) or tried > JOIN_TIMEOUT_MS:
         return _join_next(wlan, load_credentials())  # the next one, or give up
     return True
 

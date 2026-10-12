@@ -463,9 +463,9 @@ def _with_wifi(wlan, body, keys=(), line=None, polls=()):
 
 def test_wifi_background_join():
     # The launcher's join: the radio warms up first (a connect's scan right
-    # after power-up finds nothing), no scan of its own, the last network
-    # first, the next on a failure or a timeout, a second pass after a gap,
-    # a wrong password not tried again; then remembered, the clock queued.
+    # after power-up finds nothing), one scan a pass, the last network
+    # first, the next on a failure (after a grace time) or a timeout, more
+    # passes after growing gaps; then remembered, the clock queued.
     w = wifi_manager
     names = ("_NETWORK_MODULE", "CREDENTIALS_FILE", "_settings", "_set_setting", "_add_service", "_ticks_ms", "_refresh_status", "_clock_synced")
     saved = [getattr(w, name) for name in names]
@@ -486,16 +486,20 @@ def test_wifi_background_join():
         w.save_credentials({"home": "p1", "office": "p2", "cafe": "p3"})
         check("started", w.start_join(), True)
         join = hooks[0]
-        check("radio on, no connect while it warms up, no scan", (wlan.up, wlan.joins, wlan.scans), (True, [], 0))
-        check("warming", join(0, True), True)
-        clock[0] = 900
-        check("last network first", (join(900, True), wlan.joins), (True, [("office", "p2")]))
-        check("failed: next", join(950, True), True)
-        check("still joining", join(5000, True), True)
-        clock[0] = 20000
-        check("timed out: next", join(20000, True), True)
+        check("radio on, no connect while it warms up", (wlan.up, wlan.joins, wlan.scans), (True, [], 0))
+        warm = w.JOIN_WARMUP_MS
+        check("warming", join(warm - 100, True), True)
+        clock[0] = warm + 100
+        check("a scan, then the last network first", (join(clock[0], True), wlan.joins, wlan.scans), (True, [("office", "p2")], 1))
+        check("a failure inside the grace time is the last try's", (join(warm + 150, True), len(wlan.joins)), (True, 1))
+        clock[0] = warm + 100 + w.JOIN_GRACE_MS + 50
+        check("failed: next", join(clock[0], True), True)
+        check("still joining", join(clock[0] + 4000, True), True)
+        clock[0] = warm + 20000
+        check("timed out: next", join(clock[0], True), True)
         check("tried in turn", [j[0] for j in wlan.joins], ["office", "cafe", "home"])
-        check("joined: done", join(20500, True), False)
+        check("joined: done", join(warm + 20500, True), False)
+        check("when and which pass", w.LAST_JOIN[0], (warm + 20500, 1))
         check("remembered", stored["wifi_last"], "home")
         check("clock queued", hooks[-1], w._ntp_service)
         check("not joining", w.joining(), False)
@@ -507,17 +511,16 @@ def test_wifi_background_join():
         clock[0] = 0
         check("radio on already: no warm-up", w.start_join(), True)
         join = hooks[0]
-        t = 0
-        for _ in range(12):
-            t += 100
-            clock[0] = t
-            join(t, True)
-        check("first pass, the remembered one first", [j[0] for j in wlan.joins], ["home", "cafe", "office"])
-        clock[0] = t + w.JOIN_ROUND_GAP_MS + 100
-        for _ in range(6):
-            clock[0] += 100
+        keep = True
+        for _ in range(200):  # 2 s a step: past the grace time and the gaps
+            clock[0] += 2000
             keep = join(clock[0], True)
-        check("second pass skips the wrong password", [j[0] for j in wlan.joins], ["home", "cafe", "office", "home", "office"])
+            if keep is False:
+                break
+        tried = [j[0] for j in wlan.joins]
+        check("first pass, the remembered one first", tried[:3], ["home", "cafe", "office"])
+        check("every pass tries them all ('wrong password' too)", tried, ["home", "cafe", "office"] * w.JOIN_ROUNDS)
+        check("one scan a pass", wlan.scans, w.JOIN_ROUNDS)
         check("then it gives up", (keep, w.joining()), (False, False))
     finally:
         for name, value in zip(names, saved):
