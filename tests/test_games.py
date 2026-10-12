@@ -162,6 +162,12 @@ def test_pad_reads_the_fifo():
         check("shift kept for the driver", kbd.isShift, True)
         check("nothing pending", pad.poll(), ())
         check("music pumped every poll", len(ticks), 5)
+
+        def broken():
+            raise ValueError("an SD app's tick")
+
+        pu._TICK[0] = broken
+        check("a tick that raises is dropped", (pad.poll(), pu._TICK[0]), ((), None))
         stdin.ready = True
         try:
             pad.poll()

@@ -14,12 +14,13 @@ import pico_utils as _pu
 from pico_utils import activity as _activity, load_json as _load_json, pick as _pick
 from pico_utils import poll_key as _poll_key, read_key as _read_key, save_json as _save_json
 from pico_utils import screen_off as _screen_off, screen_on as _screen_on
-from pico_utils import sleep_ms as _sleep_ms, ticks_add as _ticks_add
+from pico_utils import sleep_ms as _sleep_ms, speakers_busy as _speakers_busy
+from pico_utils import ticks_add as _ticks_add
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
-from pico_utils import _TICK, _picocalc, _stdin_poll, _terminal
+from pico_utils import _TICK, _picocalc, _stdin_poll, _terminal, _tick
 from pico_utils import BLACK, BCYAN, BGREEN, BRED, BWHITE, BYELLOW, GREY, WHITE
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 
 # (module, name, what it is)
 GAMES = (
@@ -164,9 +165,8 @@ class Pad:
         self.held = set()
 
     def poll(self):
-        tick = _TICK[0]
-        if tick is not None:
-            tick()  # music playing in the background: its buffers
+        if _TICK[0] is not None:
+            _tick()  # music playing in the background: its buffers (dropped if it raises)
         kbd = self.kbd
         if kbd is None:
             key = _poll_key()
@@ -232,10 +232,7 @@ class Sound:
         self.until = None
 
     def muted(self):
-        if not self.on:
-            return True
-        music = sys.modules.get("music")
-        return music is not None and music.playing() is not None
+        return not self.on or _speakers_busy()
 
     def beep(self, freq, ms=40):
         if self.muted():
