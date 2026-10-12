@@ -544,8 +544,8 @@ def test_space_waves_boss_level():
 
 
 def test_space_draws_a_frame():
-    if framebuf is None:
-        return  # CPython: no framebuf, the game says it needs the screen
+    if framebuf is None or sys.platform == "rp2":
+        return  # CPython has no framebuf; the device no 51 KB for a second screen
     display = framebuf.FrameBuffer(bytearray(320 * 160), 320, 320, framebuf.GS4_HMSB)
     view = space.View(display)
     w = _world()
