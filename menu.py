@@ -18,7 +18,7 @@ from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_m
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 WAIT_MS = 1000  # the menu looks at the status this often (a background join)
@@ -37,7 +37,10 @@ _APP_MODULES = (
     "files",
     "music",
     "apps",
+    "games",
     "snake",
+    "tetris",
+    "space",
     "settings",
     "cal",
     "transfer",
@@ -258,8 +261,8 @@ def _apps():
     _load("apps").launcher()
 
 
-def _snake():
-    _load("snake").play()
+def _games():
+    _load("games").show()
 
 
 def _setup():
@@ -324,9 +327,8 @@ def _hint_music():
     return "{} tracks".format(count) if count else ""
 
 
-def _hint_snake():
-    best = (_load_json("snake.json") or {}).get("best")
-    return "best {}".format(best) if best else ""
+def _hint_games():
+    return "3 games"
 
 
 def _hint_notes():
@@ -377,7 +379,7 @@ _APPS = (
     ("0", "▬", "Files", _files, None),
     ("m", "ƒ", "Music", _music, _hint_music),
     ("a", "►", "Apps", _apps, _hint_apps),
-    ("s", "§", "Snake", _snake, _hint_snake),
+    ("g", "▲", "Games", _games, _hint_games),
     ("c", "╬", "Calendar", _calendar, _hint_calendar),
     ("t", "↕", "Transfer", _transfer, _hint_transfer),
     ("o", "τ", "Settings", _setup, _hint_settings),
@@ -432,9 +434,9 @@ _ABOUT = {
         "Your own programs: every .py file in /sd/apps shows up here and runs with one key.",
         (("Enter", "run"), ("q", "back")),
     ),
-    "s": (
-        "Classic Snake: eat, grow and speed up without biting yourself. The best score is kept.",
-        (("arrows/WASD", "steer"), ("p", "pause"), ("m", "sound")),
+    "g": (
+        "Snake, Tetris and Space Raid, a side-scrolling shooter like the old Nokia's Space Impact. Best scores stay on the SD card.",
+        (("\u2191\u2193", "choose"), ("Enter", "play"), ("p", "pause"), ("q", "back")),
     ),
     "c": (
         "The month with week numbers; Sundays and Italian holidays in red, Easter included.",
