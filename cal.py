@@ -9,7 +9,7 @@ from pico_utils import read_key as _read_key, screen_header as _screen_header
 from pico_utils import BCYAN, BLACK, BRED, GREY, WHITE, DISPLAY_WIDTH, SCREEN_ROWS
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 MONTHS = (
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",

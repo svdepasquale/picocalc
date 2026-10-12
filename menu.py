@@ -18,7 +18,7 @@ from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_m
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 WAIT_MS = 1000  # the menu looks at the status this often (a background join)

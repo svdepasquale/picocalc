@@ -745,9 +745,9 @@ import pico_utils as pu    # pu.backlight(n) pu.keyboard_light(n) pu.screen_off(
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-11.1` for the modules
-changed or added on 2026-10-11 (`pico_utils`, `menu`, `wifi_manager`,
-`clock_ntp`, `settings`, `cal`, `transfer`, `pico_net`, `rss_news`,
+Check on device with `<module>.ver()`: `2026-10-12.1` for the modules
+changed or added in the 2026-10-11/12 round (`pico_utils`, `menu`,
+`wifi_manager`, `settings`, `cal`, `transfer`, `pico_net`, `rss_news`,
 `openrouter_ai`, `weather`, `files`, `sys_status`, `music`, `apps`),
-`2026-10-07.1` for the others, `2026-10-06.1` for `gfx_native`,
-`2026-10-06.7` for `gfx`.
+`2026-10-11.1` for `clock_ntp`, `2026-10-07.1` for the others,
+`2026-10-06.1` for `gfx_native`, `2026-10-06.7` for `gfx`.

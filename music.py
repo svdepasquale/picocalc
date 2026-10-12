@@ -24,7 +24,7 @@ from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 2048  # samples per DMA buffer: 93 ms at 22,050 Hz
 SD_BAUDRATE = 8000000  # while playing: 214 KB/s measured, same data up to 20 MHz

@@ -25,7 +25,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 USER_AGENT = "PicoCalc"
 TIMEOUT = 15
 MAX_BYTES = 65536  # what .content reads at most

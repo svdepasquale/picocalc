@@ -9,7 +9,7 @@ from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 KEY_LOG = "keylog.txt"
 KEY_LOG_MAX = 16384
 KEY_LOG_BATCH = 20  # keys per write to keylog.txt: one flash write per batch, not per key

@@ -17,7 +17,7 @@ from pico_utils import clean as _clean
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000

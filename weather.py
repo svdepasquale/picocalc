@@ -10,7 +10,7 @@ from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9

@@ -12,7 +12,7 @@ from pico_utils import settings as _settings, wait_key as _wait_key
 from pico_utils import BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 _QUIT = ("q", "Q", "esc", "eof")
 DIM_CHOICES = (15, 30, 60, 120, 300, 0)  # seconds, 0 (never) last
 SLEEP_CHOICES = (60, 120, 300, 600, 1800, 0)

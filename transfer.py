@@ -23,7 +23,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 PORT = 80
 SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024

@@ -32,7 +32,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},

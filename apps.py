@@ -13,7 +13,7 @@ from pico_utils import clean as _clean, wait_key as _wait_key
 from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
