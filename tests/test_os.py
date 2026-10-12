@@ -165,7 +165,11 @@ def test_mcu_registers():
         mcu.writes,
         [(0x05, 240), (0x05, 16), (0x0A, 0), (0x0E, 6), (0x05, 112), (0x0A, 96)],
     )
-    check("no MCU", (pu.battery(), pu.backlight(), pu.power_off()), (None, None, False))
+    # without a keyboard MCU (never the device's real one: power_off() there
+    # really switched the PicoCalc off in a device test run, 2026-10-12)
+    got = []
+    with_pico(lambda fake: got.append((pu.battery(), pu.backlight(), pu.power_off())))
+    check("no MCU", got, [(None, None, False)])
 
 
 def test_dim_and_wake():
