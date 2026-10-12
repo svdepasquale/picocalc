@@ -4,12 +4,12 @@ import time
 
 import pico_utils as _pu
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
-from pico_utils import PAGE_LINES, battery as _battery
+from pico_utils import PAGE_LINES, battery as _battery, sort_by as _sort_by
 from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 KEY_LOG = "keylog.txt"
 KEY_LOG_MAX = 16384
 KEY_LOG_BATCH = 20  # keys per write to keylog.txt: one flash write per batch, not per key
@@ -103,7 +103,7 @@ def bat():
 
 def ls(path="/"):
     try:
-        items = sorted(os.listdir(path))
+        items = _sort_by(os.listdir(path))
         lines = []
         for name in items:
             full = path.rstrip("/") + "/" + name

@@ -241,6 +241,24 @@ def test_app_puts_back_cwd_and_console():
 # files
 
 
+def test_sort_by_makes_each_key_once():
+    # MicroPython's sort calls its key at every comparison and pivots on the
+    # last item: 300 names already in order took 45,149 key calls
+    calls = [0]
+
+    def key(name):
+        calls[0] += 1
+        return name.lower()
+
+    names = ["Track {:03d}".format(i) for i in range(300)]
+    check("in order", pu.sort_by(names, key), names)
+    check("one key call each", calls[0], 300)
+    check("reversed", pu.sort_by(names[::-1], key), names)
+    check("ties keep their order", pu.sort_by(["b", "a", "B", "A"], lambda s: s.lower()), ["a", "A", "b", "B"])
+    check("no key: the items", pu.sort_by(["b", "c", "a"]), ["a", "b", "c"])
+    check("empty", pu.sort_by([], key), [])
+
+
 def test_files_paths_and_listing():
     import files
 

@@ -645,6 +645,30 @@ def format_bytes(size):
     return "{}MB".format(value // (1024 * 1024))
 
 
+def sort_by(items, key=None):
+    """A new list of items in the order of key(item) (of the items, with no
+    key), ties in their order. MicroPython's sort calls the key at every
+    comparison and pivots on the last item, so a list already in order
+    (littlefs lists names sorted, FAT in the order the files were copied)
+    took n*n/2 key calls: 45,149 for 300 names, seconds on the device, and
+    n*n/2 comparisons even with no key. Here each key is made once and the
+    items are shuffled before the sort: a random pivot, n log n comparisons."""
+    if key is None:
+        decorated = [(item, i, item) for i, item in enumerate(items)]
+    else:
+        decorated = [(key(item), i, item) for i, item in enumerate(items)]
+    try:
+        from random import getrandbits
+    except ImportError:
+        getrandbits = None
+    if getrandbits is not None:
+        for i in range(len(decorated) - 1, 0, -1):
+            j = getrandbits(16) % (i + 1)
+            decorated[i], decorated[j] = decorated[j], decorated[i]
+    decorated.sort()
+    return [entry[2] for entry in decorated]
+
+
 def ticks_ms():
     if hasattr(time, "ticks_ms"):
         return time.ticks_ms()

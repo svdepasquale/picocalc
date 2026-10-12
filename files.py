@@ -13,11 +13,11 @@ from pico_utils import paint as _paint, pick as _pick, read_key as _read_key
 from pico_utils import read_line as _read_line, screen_header as _screen_header
 from pico_utils import wait_key as _wait_key
 from pico_utils import console_resume as _console_resume, console_suspend as _console_suspend
-from pico_utils import clean as _clean
+from pico_utils import clean as _clean, sort_by as _sort_by
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000
@@ -63,8 +63,7 @@ def entries(folder):
         else:  # ports whose ilistdir has no size field (unix)
             size = os.stat(join(folder, item[0]))[6]
         out.append((item[0], is_dir, size))
-    out.sort(key=lambda entry: (not entry[1], entry[0].lower()))
-    return out
+    return _sort_by(out, lambda entry: (not entry[1], entry[0].lower()))
 
 
 # ── text ────────────────────────────────────────

@@ -12,7 +12,7 @@ import os
 from pico_utils import DISPLAY_WIDTH
 from pico_utils import check_wifi as _check_wifi, clean as _clean, clip as _clip
 from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
-from pico_utils import paint as _paint, poll_key as _poll_key
+from pico_utils import paint as _paint, poll_key as _poll_key, sort_by as _sort_by
 from pico_utils import screen_header as _screen_header, ticks_diff as _ticks_diff
 from pico_utils import ticks_add as _ticks_add, ticks_ms as _ticks_ms, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
@@ -23,7 +23,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 PORT = 80
 SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -334,7 +334,7 @@ def _error(conn, status, text):
 def _listing(root, folder, name):
     dirs = [""]
     try:
-        for entry in sorted(os.listdir(root)):
+        for entry in _sort_by(os.listdir(root)):
             if valid_name(entry) and _is_dir(root.rstrip("/") + "/" + entry):
                 dirs.append(entry)
     except OSError:
@@ -342,7 +342,7 @@ def _listing(root, folder, name):
     files = []
     more = False
     try:
-        for entry in sorted(os.listdir(folder)):
+        for entry in _sort_by(os.listdir(folder)):
             path = folder.rstrip("/") + "/" + entry
             if entry.startswith(".") or not _is_file(path):
                 continue

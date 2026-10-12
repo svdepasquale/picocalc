@@ -9,11 +9,11 @@ import sys
 
 from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
 from pico_utils import paint as _paint, pick as _pick, screen_header as _screen_header
-from pico_utils import clean as _clean, wait_key as _wait_key
+from pico_utils import clean as _clean, sort_by as _sort_by, wait_key as _wait_key
 from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
@@ -70,8 +70,7 @@ def discover(dirs=APP_DIRS):
             info = _read_header(path) or (fname[:-3], "", "")
             # names and descriptions are shown: no control characters
             found.append((_clean(info[0]), _clean(info[1]), _clean(info[2]), path))
-    found.sort(key=lambda app: app[0].lower())
-    return found
+    return _sort_by(found, lambda app: app[0].lower())
 
 
 # ── running ─────────────────────────────────────

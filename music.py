@@ -22,6 +22,7 @@ from pico_utils import screen_header as _screen_header, sleep_ms as _sleep_ms
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import set_status_extra as _set_status_extra, set_tick as _set_tick
+from pico_utils import sort_by as _sort_by
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
@@ -220,8 +221,7 @@ def songs(dirs=MUSIC_DIRS):
             if is_dir or name.startswith(".") or not name.lower().endswith(".wav"):
                 continue
             found.append((_clean(name[:-4]), folder.rstrip("/") + "/" + name, size))
-    found.sort(key=lambda song: song[0].lower())
-    return found
+    return _sort_by(found, lambda song: song[0].lower())
 
 
 # ── hardware ────────────────────────────────────
