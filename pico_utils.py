@@ -989,128 +989,22 @@ def browse_items(
             on_key(key, item, pos)
 
 
-# ── panel refresh and flash writes ──────────────
-# Core1 pushes the framebuffer to the panel in a loop, running from flash
-# (XIP), and the driver never lets MicroPython pause it for flash writes: an
-# erase or program can pull the code from under it (a copy hung the device,
-# 2026-10-06). The driver's stopRefresh() holds core1 in reset (0.07 ms) and
-# recoverRefresh() relaunches it (0.11 ms, measured 2026-10-11): the panel
-# keeps its last frame meanwhile.
-
-_HOLDS = [0]  # refresh holds in force: flash writes, the screen switched off
-_DMA_BASE = 0x50000000  # RP2350: 16 channels, 0x40 apart
-_DMA_BUSY = 0x04000000  # CTRL_TRIG.BUSY
-_PANEL_DR = 0x40088008  # SPI1's data register: where the panel's DMA writes
-_PANEL_DMA = [None]  # the CTRL_TRIG address of the panel's DMA channel, 0: none
+# ── the panel refresh ───────────────────────────
+# Core1 pushes the framebuffer to the panel in a loop, from code in flash,
+# and the driver never lets MicroPython pause it for flash writes. Its only
+# lever, stopRefresh(), resets core1 wherever it is (recoverRefresh()
+# relaunches it): tried 2026-10-11 around every flash write, the device hung
+# twice in two device test runs (dozens of resets each; USB dead, power
+# cycle), also when the reset waited for core1 to be mid-frame. Saves in
+# normal use, unguarded since the toolkit began, never hung it; a copy
+# during a deploy did once (2026-10-06). So the toolkit never resets core1:
+# only tools/deploy.sh stops the refresh once, before a copy that ends in a
+# machine reset.
 
 
 def _picocalc(name):
     mod = sys.modules.get("picocalc")
     return getattr(mod, name, None) if mod is not None else None
-
-
-def _panel_dma():
-    if _PANEL_DMA[0] is None:
-        _PANEL_DMA[0] = 0
-        if sys.platform == "rp2":  # mem32 elsewhere is the process's memory
-            try:
-                from machine import mem32
-
-                for channel in range(16):
-                    base = _DMA_BASE + channel * 0x40
-                    if mem32[base + 4] == _PANEL_DR:
-                        _PANEL_DMA[0] = base + 0x0C
-                        break
-            except Exception:
-                pass
-    return _PANEL_DMA[0]
-
-
-def _stop_refresh(display):
-    # Core1 sleeps 5 ms between frames through the pico-sdk alarm pool, whose
-    # spin lock MicroPython's core0 takes too (every key wait): reset inside
-    # it, core1 leaves the lock taken and core0 spins on it forever with
-    # interrupts off, USB dead (the hang of 2026-10-11, many saves into a
-    # test run). So core1 is reset while it pushes a frame (the panel's DMA
-    # busy: ~45 ms of every ~50), where it takes no lock.
-    ctrl = _panel_dma()
-    if ctrl:
-        from machine import mem32
-
-        start = ticks_ms()
-        while not mem32[ctrl] & _DMA_BUSY and ticks_diff(ticks_ms(), start) < 100:
-            pass
-    display.stopRefresh()
-
-
-_TRACE = [False]  # print each real stop/restart (finding device hangs)
-
-
-def refresh_hold():
-    """Stop the panel refresh until the matching refresh_release(). Nests."""
-    if _TRACE[0] and _HOLDS[0] == 0:
-        print("[stop]")
-    if _HOLDS[0] == 0:
-        display = _picocalc("display")
-        if display is not None:
-            try:
-                _stop_refresh(display)
-            except Exception:
-                pass
-    _HOLDS[0] += 1
-
-
-def refresh_release():
-    if _HOLDS[0] <= 0:
-        return
-    _HOLDS[0] -= 1
-    if _HOLDS[0] == 0:
-        if _TRACE[0]:
-            print("[go]")
-        display = _picocalc("display")
-        if display is not None:
-            try:
-                display.recoverRefresh()
-            except Exception:
-                pass
-
-
-class _Hold:
-    # `with flash_write(path):` around anything that writes the flash
-    def __init__(self, hold):
-        self.hold = hold
-
-    def __enter__(self):
-        if self.hold:
-            refresh_hold()
-        return self
-
-    def __exit__(self, *exc):
-        if self.hold:
-            refresh_release()
-        return False
-
-
-_HOLD = _Hold(True)
-_NO_HOLD = _Hold(False)
-
-
-def on_sd(path):
-    """True for a path on the SD card (/sd...): SPI, not the flash."""
-    path = str(path)
-    if not path.startswith("/"):
-        try:
-            path = os.getcwd().rstrip("/") + "/" + path
-        except Exception:
-            return False
-    return path == "/sd" or path.startswith("/sd/")
-
-
-def flash_write(path=None):
-    """Context for writing, renaming or deleting files on flash:
-    `with flash_write(path): ...` holds the panel refresh meanwhile (paths
-    on the SD card need no hold). The pye editor's saves are not covered."""
-    return _NO_HOLD if path is not None and on_sd(path) else _HOLD
 
 
 def load_json(filepath):
@@ -1127,12 +1021,7 @@ def load_json(filepath):
 
 def save_json(filepath, data):
     """Write data as JSON through a .tmp file, keeping a .bak until the new
-    file is in place; True on success. Flash writes hold the panel refresh."""
-    with flash_write(filepath):
-        return _save_json(filepath, data)
-
-
-def _save_json(filepath, data):
+    file is in place; True on success."""
     tmp = filepath + ".tmp"
     bak = filepath + ".bak"
     try:
@@ -1432,7 +1321,7 @@ POWER_KEY = 0x91  # the keyboard MCU's code for a short press of the power butto
 
 _IDLE = [ticks_ms(), 0]  # ticks of the last key, of the last services run
 _DIM = [None]  # the backlight level to go back to, while dimmed
-_OFF = [None]  # screen off: [palette, backlight, keyboard light, since, held, network]
+_OFF = [None]  # screen off: [palette, backlight, keyboard light, since, unused, network]
 _HOOKS = []  # background services
 _BLACK = bytearray(64)  # 32 palette entries of black
 
@@ -1470,9 +1359,6 @@ def _services(now, waiting):
             _dim()
     else:
         since = ticks_diff(now, off[3])
-        if not off[4] and since >= 150:
-            refresh_hold()  # a whole black frame has reached the panel (~45 ms each)
-            off[4] = True
         if waiting and off[5] is None and current["wifi_sleep"] and since >= WIFI_SLEEP_MS:
             off[5] = _wifi_sleep()
     for fn in list(_HOOKS):
@@ -1529,8 +1415,9 @@ def _undim():
 def screen_off():
     """Switch the screen off: a black palette (the picture stays in the
     framebuffer), the backlight at its minimum (the MCU never goes lower),
-    the keyboard light off, then the panel refresh held. Apps go on: music
-    keeps playing. Any key switches it back on and does nothing else."""
+    the keyboard light off. The refresh goes on (resetting core1 is what hung
+    the device, see the panel refresh section). Apps go on: music keeps
+    playing. Any key switches it back on and does nothing else."""
     if _OFF[0] is not None:
         return
     level = _DIM[0] if _DIM[0] else backlight()
@@ -1569,8 +1456,6 @@ def screen_on():
             picocalcdisplay.setLUT(memoryview(off[0])[:32])
         except Exception:
             pass
-    if off[4]:
-        refresh_release()
     if off[1] is not None:
         backlight(off[1])
     if off[2]:

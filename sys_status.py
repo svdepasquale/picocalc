@@ -4,7 +4,7 @@ import time
 
 import pico_utils as _pu
 from pico_utils import screen_header, paged_lines, format_bytes, ticks_ms, ticks_diff
-from pico_utils import PAGE_LINES, battery as _battery, flash_write as _flash_write
+from pico_utils import PAGE_LINES, battery as _battery
 from pico_utils import paint as _paint, bar as _bar, key_bar as _key_bar
 from pico_utils import GREEN, YELLOW, RED, GREY, BCYAN, BWHITE, BLACK
 
@@ -199,14 +199,13 @@ def _log_keys(lines):
     # A log past KEY_LOG_MAX starts over: it grew forever on flash.
     if lines:
         try:
-            with _flash_write(KEY_LOG):
-                try:
-                    if os.stat(KEY_LOG)[6] > KEY_LOG_MAX:
-                        os.remove(KEY_LOG)
-                except OSError:
-                    pass
-                with open(KEY_LOG, "a") as out:
-                    out.write("\n".join(lines) + "\n")
+            try:
+                if os.stat(KEY_LOG)[6] > KEY_LOG_MAX:
+                    os.remove(KEY_LOG)
+            except OSError:
+                pass
+            with open(KEY_LOG, "a") as out:
+                out.write("\n".join(lines) + "\n")
         except OSError:
             pass
         del lines[:]

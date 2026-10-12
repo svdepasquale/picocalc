@@ -13,7 +13,7 @@ from pico_utils import paint as _paint, pick as _pick, read_key as _read_key
 from pico_utils import read_line as _read_line, screen_header as _screen_header
 from pico_utils import wait_key as _wait_key
 from pico_utils import console_resume as _console_resume, console_suspend as _console_suspend
-from pico_utils import clean as _clean, flash_write as _flash_write
+from pico_utils import clean as _clean
 from pico_utils import GREY
 
 
@@ -272,11 +272,10 @@ def delete(path, is_dir=False):
         if key not in ("y", "Y"):
             return False
     try:
-        with _flash_write(path):
-            if is_dir:
-                os.rmdir(path)
-            else:
-                os.remove(path)
+        if is_dir:
+            os.rmdir(path)
+        else:
+            os.remove(path)
     except OSError as error:
         print("Can't delete: {}".format(error))
         _wait_key()
@@ -326,8 +325,7 @@ def _new_folder(folder):
     if name is None:
         return None
     try:
-        with _flash_write(folder):
-            os.mkdir(join(folder, name))
+        os.mkdir(join(folder, name))
     except OSError as error:
         print("Can't make it: {}".format(error))
         _wait_key()

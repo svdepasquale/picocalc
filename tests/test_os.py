@@ -65,7 +65,7 @@ def with_pico(body, display=None, keyboard=None, lut=None):
     fake.display = display
     fake.keyboard = keyboard
     saved = (sys.modules.get("picocalc"), sys.modules.get("picocalcdisplay"))
-    saved_state = (pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0], pu._HOLDS[0], list(pu._HOOKS))
+    saved_state = (pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0], list(pu._HOOKS))
     sys.modules["picocalc"] = fake
     if lut is not None:
         sys.modules["picocalcdisplay"] = lut
@@ -77,8 +77,8 @@ def with_pico(body, display=None, keyboard=None, lut=None):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
-        pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0], pu._HOLDS[0] = saved_state[:5]
-        pu._HOOKS[:] = saved_state[5]
+        pu._SETTINGS[0], pu._IDLE[0], pu._DIM[0], pu._OFF[0] = saved_state[:4]
+        pu._HOOKS[:] = saved_state[4]
 
 
 def test_clean_drops_controls():
@@ -116,27 +116,11 @@ def test_safe_csi_guards_the_terminal():
     check("writer guarded", vt.drawn, ["T\x1b[{};1H\n".format(last)])
 
 
-def test_flash_write_holds_the_refresh():
-    panel = FakePanel()
-
-    def body(fake):
-        with pu.flash_write("settings.json"):
-            with pu.flash_write("notes_data.json"):
-                panel.log.append("write")
-        with pu.flash_write("/sd/music/a.wav"):
-            panel.log.append("sd")
-        try:
-            with pu.flash_write("x.json"):
-                raise ValueError("boom")
-        except ValueError:
-            pass
-        check("holds back to 0", pu._HOLDS[0], 0)
-        check("saved", pu.save_json(TMP, {"a": 1}), True)
-
-    with_pico(body, display=panel)
+def test_save_json_round_trip():
+    check("saved", pu.save_json(TMP, {"a": 1}), True)
+    check("read back", pu.load_json(TMP), {"a": 1})
+    check("no leftovers", [n for n in os.listdir(HERE) if n.startswith("_tmp_test.json.")], [])
     rm_tmp(TMP)
-    check("nested, sd and error", panel.log, ["stop", "write", "go", "sd", "stop", "go", "stop", "go"])
-    check("on_sd", (pu.on_sd("/sd"), pu.on_sd("/sd/a"), pu.on_sd("/sdx"), pu.on_sd("a.json")), (True, True, False, False))
 
 
 def test_settings_defaults_and_types():
@@ -219,20 +203,18 @@ def test_screen_off_and_on():
         check("32 of 64 bytes", lut.sizes, [32])
         check("backlight min", mcu.regs[0x05], 16)
         check("keyboard light off", mcu.regs[0x0A], 0)
-        check("no hold before a frame", panel.log, [])
         pu._services(pu.ticks_add(pu._OFF[0][3], 200), True)
-        check("held", panel.log, ["stop"])
+        check("the refresh never stopped (core1 resets hung the device)", panel.log, [])
         check("the key only wakes", pu._awake(ord("x"), now), False)
         check("on", pu.screen_is_off(), False)
         check("palette back", bytes(lut.lut[:32]), original)
-        check("released", panel.log, ["stop", "go"])
+        check("still no stop", panel.log, [])
         check("backlight back", mcu.regs[0x05], 0x50)
         check("keyboard light back", mcu.regs[0x0A], 0x40)
         check("power key: off", pu._awake(pu.POWER_KEY, now), False)
         check("off again", pu.screen_is_off(), True)
         pu.screen_on()
         check("on again", pu.screen_is_off(), False)
-        check("holds back to 0", pu._HOLDS[0], 0)
 
     with_pico(body, display=panel, keyboard=mcu, lut=lut)
 

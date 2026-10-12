@@ -4,7 +4,7 @@ live in settings.json (pico_utils.settings()); the launcher applies the
 lights at start, since the keyboard MCU forgets them at power-off."""
 
 from pico_utils import backlight as _backlight, keyboard_light as _keyboard_light
-from pico_utils import battery as _battery, flash_write as _flash_write
+from pico_utils import battery as _battery
 from pico_utils import paint as _paint, pick as _pick, power_off as _power_off
 from pico_utils import read_key as _read_key, screen_header as _screen_header
 from pico_utils import screen_off as _screen_off, set_setting as _set_setting
@@ -132,8 +132,7 @@ def switch_off():
     try:
         import os
 
-        with _flash_write():
-            os.sync()
+        os.sync()
     except Exception:
         pass
     if _usb_powered():

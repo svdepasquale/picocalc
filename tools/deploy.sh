@@ -97,7 +97,8 @@ done
 
 # Stop the refresh while core1 pushes a frame (the panel's DMA busy): reset
 # during its sleep between frames it can keep the pico-sdk alarm pool's spin
-# lock, and core0 then hangs for good on it (pico_utils._stop_refresh).
+# lock, and core0 then hangs for good on it. The only core1 reset left: the
+# toolkit itself never stops the refresh (CLAUDE.md, resets hung the device).
 mp exec "
 import picocalc
 from machine import mem32
