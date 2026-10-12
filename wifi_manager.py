@@ -3,6 +3,7 @@ import time
 from pico_utils import net_error as _net_error
 from pico_utils import screen_header as _screen_header, paged_lines as _paged_lines
 from pico_utils import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
+from pico_utils import ticks_add as _ticks_add
 from pico_utils import read_key as _read_key, read_line as _read_line, poll_key as _poll_key
 from pico_utils import clock_synced as _clock_synced, clean as _clean, save_json as _save_json
 from pico_utils import settings as _settings, set_setting as _set_setting
@@ -361,8 +362,10 @@ def _sync_clock():
 # with no scan (one blocks for ~2 s); once joined, the clock is set quietly.
 
 JOIN_TIMEOUT_MS = 12000  # per network
+JOIN_ROUNDS = 2  # passes over the saved networks
+JOIN_ROUND_GAP_MS = 20000  # between passes
 NTP_RETRY_MS = 30000
-_JOIN = {}  # order: names left to try, ssid: the one tried, since: its start
+_JOIN = {}  # order, names: the pass; ssid, since: the try; round, wait: when to try
 _NTP = [0, 0]  # quiet NTP tries, ticks of the last
 
 
@@ -373,8 +376,12 @@ def start_join():
     if not credentials:
         return False
     wlan = _sta_wlan()
+    warm = 0
     if not wlan.active():
         wlan.active(True)
+        # the radio's first scan right after power-up finds nothing (connect
+        # scans): the service connects after the warm-up, the menu draws now
+        warm = WLAN_WARMUP_MS
     if wlan.isconnected():
         _joined(None)
         return False
@@ -384,9 +391,10 @@ def start_join():
         order.remove(last)
         order.insert(0, last)
     _JOIN.clear()
-    _JOIN["order"] = order
-    if not _join_next(wlan, credentials):
-        return False
+    _JOIN["names"] = order
+    _JOIN["order"] = list(order)
+    _JOIN["round"] = 1
+    _JOIN["wait"] = _ticks_add(_ticks_ms(), warm)
     _add_service(_join_service)
     return True
 
@@ -403,6 +411,9 @@ def stop_join():
 
 
 def _join_next(wlan, credentials):
+    # Connect to the next saved network of this pass; at the end of a pass,
+    # wait JOIN_ROUND_GAP_MS and start another (a network can be busy or out
+    # of reach for a moment). False once the passes are over.
     while _JOIN.get("order"):
         ssid = _JOIN["order"].pop(0)
         if ssid not in credentials:
@@ -413,6 +424,12 @@ def _join_next(wlan, credentials):
             continue
         _JOIN["ssid"] = ssid
         _JOIN["since"] = _ticks_ms()
+        return True
+    if _JOIN.get("round", JOIN_ROUNDS) < JOIN_ROUNDS and _JOIN.get("names"):
+        _JOIN["round"] += 1
+        _JOIN["order"] = list(_JOIN["names"])
+        _JOIN["ssid"] = None
+        _JOIN["wait"] = _ticks_add(_ticks_ms(), JOIN_ROUND_GAP_MS)
         return True
     _JOIN.clear()
     return False
@@ -427,7 +444,15 @@ def _join_service(now, waiting):
         _JOIN.clear()
         _joined(ssid)
         return False
-    if wlan.status() < 0 or _ticks_diff(now, _JOIN["since"]) > JOIN_TIMEOUT_MS:
+    if "wait" in _JOIN:
+        if _ticks_diff(now, _JOIN["wait"]) < 0:
+            return True  # the radio warming up, or the gap between passes
+        del _JOIN["wait"]
+        return _join_next(wlan, load_credentials())
+    status = wlan.status()
+    if status == -3 and _JOIN.get("ssid") in _JOIN.get("names", ()):
+        _JOIN["names"].remove(_JOIN["ssid"])  # wrong password: not again
+    if status < 0 or _ticks_diff(now, _JOIN["since"]) > JOIN_TIMEOUT_MS:
         return _join_next(wlan, load_credentials())  # the next one, or give up
     return True
 

@@ -462,17 +462,17 @@ def _with_wifi(wlan, body, keys=(), line=None, polls=()):
 
 
 def test_wifi_background_join():
-    # The launcher's join: no scan, the last network first, the next one on
-    # a failure or a timeout, then remembered and the clock queued for NTP.
+    # The launcher's join: the radio warms up first (a connect's scan right
+    # after power-up finds nothing), no scan of its own, the last network
+    # first, the next on a failure or a timeout, a second pass after a gap,
+    # a wrong password not tried again; then remembered, the clock queued.
     w = wifi_manager
     names = ("_NETWORK_MODULE", "CREDENTIALS_FILE", "_settings", "_set_setting", "_add_service", "_ticks_ms", "_refresh_status", "_clock_synced")
     saved = [getattr(w, name) for name in names]
-    wlan = FakeWlan(up=False, reach={"office": -2, "cafe": 1, "home": 3})
     hooks = []
     stored = {"wifi_last": "office"}
     clock = [0]
     try:
-        w._NETWORK_MODULE = FakeNetwork(wlan)
         w.CREDENTIALS_FILE = TMP
         w._settings = lambda: stored
         w._set_setting = lambda name, value: stored.update({name: value})
@@ -480,12 +480,17 @@ def test_wifi_background_join():
         w._ticks_ms = lambda: clock[0]
         w._refresh_status = lambda: None
         w._clock_synced = lambda: False
+        wlan = FakeWlan(up=False, reach={"office": -2, "cafe": 1, "home": 3})
+        w._NETWORK_MODULE = FakeNetwork(wlan)
         check("nothing saved", w.start_join(), False)
         w.save_credentials({"home": "p1", "office": "p2", "cafe": "p3"})
         check("started", w.start_join(), True)
-        check("radio on, last first, no scan", (wlan.up, wlan.joins, wlan.scans), (True, [("office", "p2")], 0))
         join = hooks[0]
-        check("failed: next", join(0, True), True)
+        check("radio on, no connect while it warms up, no scan", (wlan.up, wlan.joins, wlan.scans), (True, [], 0))
+        check("warming", join(0, True), True)
+        clock[0] = 900
+        check("last network first", (join(900, True), wlan.joins), (True, [("office", "p2")]))
+        check("failed: next", join(950, True), True)
         check("still joining", join(5000, True), True)
         clock[0] = 20000
         check("timed out: next", join(20000, True), True)
@@ -495,6 +500,25 @@ def test_wifi_background_join():
         check("clock queued", hooks[-1], w._ntp_service)
         check("not joining", w.joining(), False)
         check("already up", w.start_join(), False)
+
+        del hooks[:]
+        wlan = FakeWlan(up=True, reach={"office": -2, "cafe": -3, "home": -2})
+        w._NETWORK_MODULE = FakeNetwork(wlan)
+        clock[0] = 0
+        check("radio on already: no warm-up", w.start_join(), True)
+        join = hooks[0]
+        t = 0
+        for _ in range(12):
+            t += 100
+            clock[0] = t
+            join(t, True)
+        check("first pass, the remembered one first", [j[0] for j in wlan.joins], ["home", "cafe", "office"])
+        clock[0] = t + w.JOIN_ROUND_GAP_MS + 100
+        for _ in range(6):
+            clock[0] += 100
+            keep = join(clock[0], True)
+        check("second pass skips the wrong password", [j[0] for j in wlan.joins], ["home", "cafe", "office", "home", "office"])
+        check("then it gives up", (keep, w.joining()), (False, False))
     finally:
         for name, value in zip(names, saved):
             setattr(w, name, value)
