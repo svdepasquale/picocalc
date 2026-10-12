@@ -597,7 +597,7 @@ def serve(port=PORT, root=SD_ROOT):
             try:
                 handle(_Client(conn, state), state)
             except (OSError, MemoryError) as error:  # one request lost, not the server
-                _log(state, "dropped: {}".format(error or "out of memory"))
+                _log(state, "dropped: {}".format(str(error) or "out of memory"))
             finally:
                 conn.close()
                 gc.collect()

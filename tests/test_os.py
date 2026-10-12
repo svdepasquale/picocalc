@@ -383,6 +383,13 @@ def test_input_waits_do_the_idle_work():
         pu._LAST_TICK[0] = long_ago
         term.readinto(buf)
         check("a tick that raises is dropped", pu._TICK[0], None)
+
+        def polls_keys(now, waiting):
+            raise pu.HostTakeover  # an app's service that polled keys
+
+        pu.add_service(polls_keys)
+        pu._IDLE[1] = long_ago
+        check("a host seen in there stays in there", term.readinto(buf), 0)
         pu._OFF[0] = [None, None, None, pu.ticks_ms(), False, None]
         term = pu._ScreenTerm(QuietTerm(b"\x1b[A"))
         check("the arrow that wakes the screen goes whole", (term.readinto(buf), pu.screen_is_off(), term._term.keys), (None, False, []))

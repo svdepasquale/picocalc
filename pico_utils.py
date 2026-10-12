@@ -1392,17 +1392,24 @@ def _input_idle():
     # input() reads keys through _ScreenTerm.readinto(), not _key_byte():
     # under the launcher (the calculator, AI chat, notes) the screen never
     # dimmed or went off there, the music in the background stopped and the
-    # Wi-Fi join waited. Nothing here may read stdin (see _ScreenTerm._drain).
+    # Wi-Fi join waited. Nothing here may read stdin (see _ScreenTerm._drain):
+    # the toolkit's services and the music's tick don't (checked 2026-10-12).
     now = ticks_ms()
-    if _TICK[0] is not None:
-        since = ticks_diff(now, _LAST_TICK[0])
-        if since >= _TICK_MS or since < 0:
-            _LAST_TICK[0] = now
-            _tick()
-    since = ticks_diff(now, _IDLE[1])
-    if since >= SERVICE_MS or since < 0:
-        _IDLE[1] = now
-        _services(now, True)
+    try:
+        if _TICK[0] is not None:
+            since = ticks_diff(now, _LAST_TICK[0])
+            if since >= _TICK_MS or since < 0:
+                _LAST_TICK[0] = now
+                _tick()
+        since = ticks_diff(now, _IDLE[1])
+        if since >= SERVICE_MS or since < 0:
+            _IDLE[1] = now
+            _services(now, True)
+    except HostTakeover:
+        # Only an app's service or tick that polls keys can raise it here:
+        # out of readinto() it would make dupterm detach the screen, and the
+        # host's bytes reach input() anyway, as they always did.
+        pass
 
 
 OFF_POLL_MS = 100  # key poll period while the screen is off
