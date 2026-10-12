@@ -169,9 +169,10 @@ def test_app_discover_and_run():
         write_file(folder + "/notes.txt", "x")
         write_file(folder + "/boom.py", "1/0\n")
         write_file(folder + "/leave.py", "import sys\nsys.exit()\n")
+        write_file(folder + "/GAME.PY", "x = 1\n")  # how FAT lists an 8.3 name
         found = apps.discover((folder,))
         names = [app[0] for app in found]
-        check("sorted, dot files and non-py skipped", names, ["_tmp_helper", "Alpha", "beta", "boom", "leave"])
+        check("sorted, dot files and non-py skipped", names, ["_tmp_helper", "Alpha", "beta", "boom", "GAME", "leave"])
         check("header fields", found[1][:3], ("Alpha", "Games", "fun"))
         keys_from(b" ")
         check("runs as main", apps.run_app(folder + "/zeta.py"), True)
@@ -257,6 +258,32 @@ def test_sort_by_makes_each_key_once():
     check("ties keep their order", pu.sort_by(["b", "a", "B", "A"], lambda s: s.lower()), ["a", "A", "b", "B"])
     check("no key: the items", pu.sort_by(["b", "c", "a"]), ["a", "b", "c"])
     check("empty", pu.sort_by([], key), [])
+
+
+def test_files_browse_from_a_bad_path_ends():
+    # parent("nope") is "nope": a relative start that failed to list looped
+    import files
+
+    calls = [0]
+
+    def no_list(folder):
+        calls[0] += 1
+        if calls[0] > 20:
+            raise RuntimeError("looped")
+        raise OSError(2, "no such folder")
+
+    saved = swap(files, {"entries": no_list, "_wait_key": lambda *args: None, "print": lambda *args, **kw: None})
+    try:
+        try:
+            got = files.browse("nope")
+        except RuntimeError as error:
+            got = str(error)
+        check("climbs to / and ends", (got, calls[0] < 20), (None, True))
+    finally:
+        unswap(files, saved)
+    line = "".join(chr(65 + i % 26) for i in range(1000))
+    lines = files.text_lines(line, 52)
+    check("a long line cut whole", ("".join(lines), [len(l) for l in lines[:-1]] == [52] * 19, len(lines[-1])), (line, True, 12))
 
 
 def test_files_paths_and_listing():

@@ -13,7 +13,7 @@ from pico_utils import clean as _clean, sort_by as _sort_by, wait_key as _wait_k
 from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
@@ -64,7 +64,7 @@ def discover(dirs=APP_DIRS):
         except OSError:
             continue
         for fname in names:
-            if not fname.endswith(".py") or fname.startswith("."):
+            if not fname.lower().endswith(".py") or fname.startswith("."):  # GAME.PY: an 8.3 name
                 continue
             path = folder.rstrip("/") + "/" + fname
             info = _read_header(path) or (fname[:-3], "", "")

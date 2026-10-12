@@ -311,7 +311,7 @@ def _hint_apps():
     count = 0
     for folder in ("/sd/apps", "/apps"):
         try:
-            count += len([n for n in os.listdir(folder) if n.endswith(".py")])
+            count += len([n for n in os.listdir(folder) if n.lower().endswith(".py") and n[0] != "."])
         except OSError:
             pass
     return "{} found".format(count) if count else ""

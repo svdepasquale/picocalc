@@ -17,7 +17,7 @@ from pico_utils import clean as _clean, sort_by as _sort_by
 from pico_utils import GREY
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 VIEW_MAX = 32768  # bytes the viewer reads from one file
 EDIT_MAX = 32768  # the editor holds the whole file in RAM, several times over
 _DIR = 0x4000
@@ -128,10 +128,13 @@ def text_lines(text, width=DISPLAY_WIDTH):
         text = text[:-1]
     out = []
     for line in text.split("\n"):
-        while len(line) > width:
-            out.append(line[:width])
-            line = line[width:]
-        out.append(line)
+        if len(line) <= width:
+            out.append(line)
+            continue
+        # cut by index: line = line[width:] copied the rest at every cut (a
+        # 32 KB line, ~10 MB of short-lived strings and many collections)
+        for i in range(0, len(line), width):
+            out.append(line[i : i + width])
     return out
 
 
@@ -337,7 +340,7 @@ def _new_folder(folder):
 
 def browse(path="/"):
     """File browser from `path`; q goes back."""
-    folder = path
+    folder = path if path.startswith("/") else join(os.getcwd(), path)
     want = None  # name to highlight after a change of folder or a new item
     pos = 0
     while True:
@@ -346,9 +349,10 @@ def browse(path="/"):
         except OSError as error:
             print("Can't list {}: {}".format(_short(folder, 40), error))
             _wait_key()
-            if folder == "/":
+            up = parent(folder)
+            if up == folder:  # "/" itself: a relative start looped here forever
                 return None
-            folder, want = parent(folder), None
+            folder, want = up, None
             continue
         if want is not None:
             pos = 0
@@ -385,7 +389,7 @@ def browse(path="/"):
                 view(target)
         elif key == "e" and not is_dir:
             edit(target)
-        elif key == "r" and name.endswith(".py"):
+        elif key == "r" and name.lower().endswith(".py"):  # FAT lists 8.3 names in capitals
             run(target)
         elif key == "d":
             if delete(target, is_dir):
