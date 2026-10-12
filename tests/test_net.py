@@ -314,6 +314,9 @@ def test_weather_one_request():
         check("new place asks again", len(req.calls), 5)
         both = weather.report()
         check("report: both, one request", (both["now"]["desc"], len(both["days"]), len(req.calls)), ("Partly cloudy", 3, 6))
+        clock[0] -= 1000  # 6 to 12 days on, the wrapped age reads negative
+        weather.forecast(3)
+        check("a negative age is not fresh", len(req.calls), 7)
 
     _with_weather(run)
 
