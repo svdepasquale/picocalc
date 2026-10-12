@@ -209,6 +209,8 @@ def run(namespace):
     # every test_* callable of an area file, in name order
     tests = [(k, v) for k, v in sorted(namespace.items()) if k.startswith("test_") and callable(v)]
     for name, fn in tests:
+        if sys.platform == "rp2":
+            print(".. " + name)  # a run that hangs on the device shows where
         try:
             fn()
         except Exception as error:

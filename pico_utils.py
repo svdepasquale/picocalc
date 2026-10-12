@@ -1043,8 +1043,13 @@ def _stop_refresh(display):
     display.stopRefresh()
 
 
+_TRACE = [False]  # print each real stop/restart (finding device hangs)
+
+
 def refresh_hold():
     """Stop the panel refresh until the matching refresh_release(). Nests."""
+    if _TRACE[0] and _HOLDS[0] == 0:
+        print("[stop]")
     if _HOLDS[0] == 0:
         display = _picocalc("display")
         if display is not None:
@@ -1060,6 +1065,8 @@ def refresh_release():
         return
     _HOLDS[0] -= 1
     if _HOLDS[0] == 0:
+        if _TRACE[0]:
+            print("[go]")
         display = _picocalc("display")
         if display is not None:
             try:
