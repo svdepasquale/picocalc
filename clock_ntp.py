@@ -3,14 +3,14 @@ import time
 from pico_utils import load_json, save_json, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import CLOCK_CONFIG_FILE as CONFIG_FILE
 from pico_utils import utc_offset_hours as _utc_offset_hours, local_time as _local_time_at
-from pico_utils import clock_synced as _clock_synced
+from pico_utils import clock_synced as _clock_synced, net_error as _net_error
 from pico_utils import poll_key as _poll_key, sleep_ms as _sleep_ms, title_bar as _title_bar
 from pico_utils import ticks_add as _ticks_add, screen_header as _screen_header
 from pico_utils import paint as _paint, bar as _bar, block_rows as _block_rows, DISPLAY_WIDTH
 from pico_utils import BCYAN, BYELLOW, GREY, GREEN
 
 
-MODULE_VERSION = "2026-10-11.1"
+MODULE_VERSION = "2026-10-12.1"
 NTP_HOST = "pool.ntp.org"
 NTP_TIMEOUT = 5
 MAX_NTP_RETRIES = 2
@@ -114,7 +114,7 @@ def sync():
             print("OK. UTC:", _fmt(time.gmtime()))
             return True
         except Exception as e:
-            print("Sync err:", e)
+            print("Sync err:", _net_error(e))  # -2 is "DNS failed"
             if attempt < MAX_NTP_RETRIES - 1:
                 print("Retrying...")
     return False

@@ -1,5 +1,4 @@
 import gc
-import time
 
 from pico_utils import clean as _clean, clip as _clip
 from pico_utils import paged_lines as _paged_lines
@@ -7,6 +6,7 @@ from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
 from pico_utils import http_request as _http_request, wrap_text as _wrap_text
+from pico_utils import net_error as _net_error
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import poll_key as _poll_key
 from pico_utils import screen_header as _screen_header
@@ -32,7 +32,7 @@ MAX_SUMMARY_CHARS = 480
 DEFAULT_PREVIEW_CHARS = 110
 DEFAULT_ITEMS_PER_FEED = 2
 MAX_FEEDS = 12
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 
 DEFAULT_FEEDS = [
     {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
@@ -332,18 +332,7 @@ def _parse_feed(xml_text, max_items):
             link = _extract_first_tag(block, ["link"], block_lower)
 
             if link == "":
-                marker = "<link"
-                idx = block_lower.find(marker)
-                if idx >= 0:
-                    end = block_lower.find(">", idx)
-                    if end > idx:
-                        tag_text = block[idx:end]
-                        href_pos = block_lower[idx:end].find('href="')
-                        if href_pos >= 0:
-                            href_start = href_pos + 6
-                            href_end = tag_text.find('"', href_start)
-                            if href_end > href_start:
-                                link = tag_text[href_start:href_end]
+                link = _atom_link(block, block_lower)
 
         clean_title = _clean_text(title, MAX_TITLE_CHARS, html=False)
         clean_summary = _clean_text(summary, MAX_SUMMARY_CHARS)
@@ -384,74 +373,60 @@ def _default_config():
     }
 
 
-def _ensure_config(persist=True):
+def _ensure_config():
+    # the config with its values checked: in memory only (the callers save)
     config = _load_config()
-    changed = False
 
     if not isinstance(config.get("feeds"), list) or not config.get("feeds"):
         config["feeds"] = [{"name": item["name"], "url": item["url"]} for item in DEFAULT_FEEDS]
-        changed = True
     else:
         normalized = []
         seen_urls = set()
         for item in config["feeds"]:
             if not isinstance(item, dict):
-                changed = True
                 continue
 
             name = _normalize_name(item.get("name", ""))
             url = _normalize_url(item.get("url", ""))
             if name == "" or url == "":
-                changed = True
                 continue
             if url in seen_urls:
-                changed = True
                 continue
 
             seen_urls.add(url)
-            if item.get("name") != name or item.get("url") != url or len(item) != 2:
-                changed = True
             normalized.append({"name": name, "url": url})
             if len(normalized) >= MAX_FEEDS:
-                changed = True
                 break
 
         if not normalized:
             normalized = [{"name": item["name"], "url": item["url"]} for item in DEFAULT_FEEDS]
-            changed = True
 
         config["feeds"] = normalized
 
     if not isinstance(config.get("preview_chars"), int):
         config["preview_chars"] = DEFAULT_PREVIEW_CHARS
-        changed = True
 
     if not isinstance(config.get("items_per_feed"), int):
         config["items_per_feed"] = DEFAULT_ITEMS_PER_FEED
-        changed = True
 
     preview_value = max(48, min(320, int(config["preview_chars"])))
     items_value = max(1, min(4, int(config["items_per_feed"])))
-    if preview_value != config["preview_chars"] or items_value != config["items_per_feed"]:
-        changed = True
     config["preview_chars"] = preview_value
     config["items_per_feed"] = items_value
-
-    if changed and persist:
-        _save_config(config)
 
     return config
 
 
 def reset_feeds():
     config = _default_config()
-    _save_config(config)
+    if not _save_config(config):
+        return False  # save_json() said why
     print("Feeds reset.")
     return True
 
 
 def feeds():
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     feed_list = config.get("feeds", [])
 
     if not feed_list:
@@ -481,7 +456,7 @@ def add_feed(name, url):
         print("Invalid URL.")
         return False
 
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     feed_list = config.get("feeds", [])
 
     for item in feed_list:
@@ -495,13 +470,14 @@ def add_feed(name, url):
 
     feed_list.append({"name": feed_name, "url": feed_url})
     config["feeds"] = feed_list
-    _save_config(config)
+    if not _save_config(config):
+        return False
     print("Added:", feed_name)
     return True
 
 
 def rm_feed(index_or_name):
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     feed_list = config.get("feeds", [])
     if not feed_list:
         print("No feeds.")
@@ -528,7 +504,8 @@ def rm_feed(index_or_name):
         return False
 
     config["feeds"] = feed_list
-    _save_config(config)
+    if not _save_config(config):
+        return False
     print("Removed:", removed.get("name", "?"))
     return True
 
@@ -541,9 +518,10 @@ def set_preview(chars):
         return False
 
     value = max(48, min(320, value))
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     config["preview_chars"] = value
-    _save_config(config)
+    if not _save_config(config):
+        return False
     print("Preview chars:", value)
     return value
 
@@ -556,9 +534,10 @@ def set_items_per_feed(count):
         return False
 
     value = max(1, min(4, value))
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     config["items_per_feed"] = value
-    _save_config(config)
+    if not _save_config(config):
+        return False
     print("Items/feed:", value)
     return value
 
@@ -589,7 +568,7 @@ def _decode_text(buf, got):
     for cut in range(4):  # the cap can split a UTF-8 sequence
         try:
             return str(view[: max(0, got - cut)], "utf-8")
-        except Exception:
+        except UnicodeError:  # a MemoryError is no reason to drop the accents
             pass
     for i in range(got):  # not UTF-8 at all: keep the ASCII part
         if buf[i] > 127:
@@ -597,9 +576,39 @@ def _decode_text(buf, got):
     return str(view[:got], "utf-8")
 
 
-def _read_body(response, buf):
-    buf, got = _read_capped(response, buf)
-    return _decode_text(buf, got)
+def _attr(tag, lower, name):
+    # The value of attribute `name` in a tag, quoted with " or ' ("" if none).
+    at = lower.find(name + "=")
+    while at > 0 and lower[at - 1] not in " \t\r\n":
+        at = lower.find(name + "=", at + 1)  # hreflang= is not href=
+    if at <= 0:
+        return ""
+    start = at + len(name) + 1
+    quote = tag[start : start + 1]
+    if quote not in ("'", '"'):
+        return ""
+    end = tag.find(quote, start + 1)
+    return tag[start + 1 : end] if end > start else ""
+
+
+def _atom_link(block, block_lower):
+    # An Atom entry's page: the link with rel="alternate", or with no rel.
+    # The first <link> was taken, double quotes only: Blogger quotes with '
+    # (no link at all) and puts rel='replies' (the comments) first.
+    first = ""
+    at = block_lower.find("<link")
+    while at >= 0:
+        end = block_lower.find(">", at)
+        if end < 0:
+            break
+        tag, lower = block[at:end], block_lower[at:end]
+        href = _attr(tag, lower, "href")
+        if href:
+            if _attr(tag, lower, "rel").lower() in ("", "alternate"):
+                return href
+            first = first or href
+        at = block_lower.find("<link", end)
+    return first
 
 
 def _fetch_feed(name, url, per_feed, requests):
@@ -620,10 +629,9 @@ def _fetch_feed(name, url, per_feed, requests):
         if status != 200:
             print("HTTP:", status)
             return []
-        xml_text = _read_body(response, buf)
-        del buf
+        buf, got = _read_capped(response, buf)
     except Exception as error:
-        print("Fetch err:", _clip(_clean(str(error)), 24))
+        print("Fetch err:", _net_error(error))
         return []
     finally:
         if response is not None:
@@ -631,6 +639,10 @@ def _fetch_feed(name, url, per_feed, requests):
                 response.close()
             except Exception:
                 pass
+    # decoded once the response, and its TLS buffers, are gone: the text is
+    # a second copy of the body
+    xml_text = _decode_text(buf, got)
+    del buf
 
     if not xml_text:
         print("Empty feed.")
@@ -653,7 +665,7 @@ def _fetch_feed(name, url, per_feed, requests):
 def latest(feed=None, per_feed=None, show=True):
     global _LAST_ITEMS
 
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     feed_list = config.get("feeds", [])
     preview_chars = int(config.get("preview_chars", DEFAULT_PREVIEW_CHARS))
     items_per_feed = int(config.get("items_per_feed", DEFAULT_ITEMS_PER_FEED))
@@ -753,7 +765,7 @@ def view(index=1):
         print("No cached news. Run latest().")
         return None
 
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     preview_chars = int(config.get("preview_chars", DEFAULT_PREVIEW_CHARS))
     return _browse_items(
         "RSS News",
@@ -887,7 +899,7 @@ def mf(limit=MF_LIMIT):
             print("Out of memory.")
             return 0
         except Exception as error:
-            print("Fetch err:", _clip(_clean(str(error)), 24))
+            print("Fetch err:", _net_error(error))
             return 0
         if status == 401:
             print("Miniflux: bad API key (not retrying).")
@@ -946,7 +958,7 @@ def mf_done():
         )
         status = response.status_code
     except Exception as error:
-        print("Err:", _clip(_clean(str(error)), 24))
+        print("Err:", _net_error(error))
         return False
     finally:
         if response is not None:
@@ -980,7 +992,7 @@ def add_feed_prompt():
 
 
 def setup():
-    config = _ensure_config(persist=False)
+    config = _ensure_config()
     print("RSS setup")
     print("Preview:", config.get("preview_chars"))
     print("Items/feed:", config.get("items_per_feed"))
