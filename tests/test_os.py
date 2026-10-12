@@ -267,8 +267,9 @@ def test_settings_app_power_cycle():
 
     answers = [True, True, False, False, True]
     restarts = []
-    app.wait_power_cycle(lambda: answers.pop(0), lambda: restarts.append(1), lambda: None)
-    check("restart once back on", (restarts, answers), ([1], []))
+    watch = app.PowerWatch(lambda: answers.pop(0), lambda: restarts.append(1))
+    ticks = [watch.tick() for _ in range(5)]
+    check("restart once back on", (ticks, restarts, answers), ([False, False, False, False, True], [1], []))
 
 
 

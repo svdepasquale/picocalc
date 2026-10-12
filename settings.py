@@ -138,30 +138,49 @@ def switch_off():
     if _usb_powered():
         print(_paint("USB power: the Pico stays on. Switch the", GREY))
         print(_paint("PicoCalc on again and it restarts.", GREY))
-    # on battery the power goes before this returns; on USB the Pico restarts
-    # once the PicoCalc is on again (the panel needs setting up)
-    wait_power_cycle()
+    # on battery the power goes in 6 s; on USB the Pico restarts once the
+    # PicoCalc is on again (the panel needs setting up), by a timer: a loop
+    # here ended at the first USB tool connecting (HostTakeover)
+    restart_when_back()
     return True
 
 
-def wait_power_cycle(answers=None, restart=None, wait=None):
-    """Wait for the keyboard MCU to stop answering (the PicoCalc is off) and
-    then to answer again, then restart (the panel lost its setup with the
-    power). The other arguments are for the tests."""
-    answers = answers or (lambda: _battery() is not None)
-    wait = wait or (lambda: _read_key(500))  # HostTakeover still gets through
-    if restart is None:
-        import machine
+class PowerWatch:
+    """One look a second at the keyboard MCU: once it has stopped answering
+    (the PicoCalc off) and answers again, restart the Pico."""
 
-        restart = machine.reset
-    seen_off = False
-    while True:
-        if not answers():
-            seen_off = True
-        elif seen_off:
-            restart()
+    def __init__(self, answers=None, restart=None):
+        self.answers = answers or (lambda: _battery() is not None)
+        self.restart = restart
+        self.seen_off = False
+
+    def tick(self, timer=None):
+        if not self.answers():
+            self.seen_off = True
+        elif self.seen_off:
+            if timer is not None:
+                timer.deinit()
+            if self.restart is None:
+                import machine
+
+                machine.reset()
+            else:
+                self.restart()
             return True
-        wait()
+        return False
+
+
+_WATCH = [None]  # the running timer: kept, or it would be collected
+
+
+def restart_when_back():
+    """Arm the PowerWatch on a periodic timer (it outlives the app and any
+    REPL session)."""
+    import machine
+
+    watch = PowerWatch()
+    _WATCH[0] = machine.Timer(period=1000, mode=machine.Timer.PERIODIC, callback=watch.tick)
+    return watch
 
 
 # ── screen ──────────────────────────────────────
