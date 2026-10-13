@@ -44,6 +44,13 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calc
 - `settings.py` → lights, dimming and screen-off delays, Wi-Fi at start, switching off
 - `pico_net.py` → the toolkit's HTTP client (TLS checked where a key goes)
 
+Firmware: the toolkit runs on ClockworkPi's MicroPython for the PicoCalc. On
+that firmware a write to the Pico's flash (saving notes or settings) can hang
+the device, because the screen refresh runs from the same flash. `tools/build_firmware.sh`
+rebuilds the same firmware with that fixed (see CLAUDE.md, Build and deploy):
+flash it with `machine.bootloader()` and a copy of the UF2 to the RP2350 drive;
+the files on the device stay.
+
 Deploy with `tools/deploy.sh` (needs `mpremote` and `mpy-cross`: `brew install
 micropython`): it compiles the modules to `.mpy` for the firmware's bytecode
 (they load 5-11x faster than `.py`: the launcher is up 2.4 s after power-on
