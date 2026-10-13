@@ -1,0 +1,11 @@
+--- a/pico_files/modules/picocalc.py
++++ b/pico_files/modules/picocalc.py
+@@ -141,7 +141,7 @@
+         self.ignor = True
+         self.address = address
+         self.temp=bytearray(2)
+-        self.reset()
++        #self.reset()
+         self.isShift = False
+         self.isCtrl = False
+         self.isAlt = False
