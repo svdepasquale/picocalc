@@ -1,0 +1,24 @@
+diff --git a/ports/rp2/rp2_flash.c b/ports/rp2/rp2_flash.c
+index 4d41d4573..18839931a 100644
+--- a/ports/rp2/rp2_flash.c
++++ b/ports/rp2/rp2_flash.c
+@@ -115,14 +115,12 @@ bi_decl(bi_block_device(
+     BINARY_INFO_BLOCK_DEV_FLAG_PT_UNKNOWN));
+ #endif
+ 
+-// This is a workaround to pico-sdk #2201: https://github.com/raspberrypi/pico-sdk/issues/2201
+-// which means the multicore_lockout_victim_is_initialized returns true even after core1 is reset.
++// PicoCalc: core1 may run C code that is not a MicroPython thread (the display
++// driver's panel refresh), so the lockout follows the victim flag alone. The
++// pico-sdk in use (2.1.1) clears that flag in multicore_reset_core1(), which
++// fixes pico-sdk #2201, the reason upstream also required core1_entry.
+ static bool use_multicore_lockout(void) {
+-    return multicore_lockout_victim_is_initialized(1 - get_core_num())
+-           #if MICROPY_PY_THREAD
+-           && core1_entry != NULL
+-           #endif
+-    ;
++    return multicore_lockout_victim_is_initialized(1 - get_core_num());
+ }
+ 
+ // Function to set the flash divisor to the correct divisor, assumes interrupts disabled
