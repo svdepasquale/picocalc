@@ -27,12 +27,45 @@ class FakeResponse:
         self.raw = FakeRaw(data)
 
 
+def _body(data, size):
+    # read capped, then decoded (after the response is closed)
+    buf, got = rss_news._read_capped(FakeResponse(data), bytearray(size))
+    return rss_news._decode_text(buf, got)
+
+
 def test_read_body_cap_and_decode():
-    body = rss_news._read_body(FakeResponse(b"x" * 100), bytearray(40))
-    check("cap", len(body), 40)
-    check("utf8 cut at cap", rss_news._read_body(FakeResponse("abcà".encode()), bytearray(4)), "abc")
-    check("latin-1 falls back", rss_news._read_body(FakeResponse(b"caf\xe9 ok"), bytearray(50)), "caf? ok")
-    check("short body", rss_news._read_body(FakeResponse(b"<rss/>"), bytearray(50)), "<rss/>")
+    check("cap", len(_body(b"x" * 100, 40)), 40)
+    check("utf8 cut at cap", _body("abcà".encode(), 4), "abc")
+    check("latin-1 falls back", _body(b"caf\xe9 ok", 50), "caf? ok")
+    check("short body", _body(b"<rss/>", 50), "<rss/>")
+
+
+def test_atom_link_saves_and_errors():
+    # Blogger quotes with ' and puts rel='replies' (the comments) first
+    feed = (
+        "<feed><entry><title>T</title><link rel='replies' href='https://b.example/c'/>"
+        "<link rel='alternate' type='text/html' href='https://b.example/p.html'/></entry></feed>"
+    )
+    check("the post, not its comments", [i["link"] for i in rss_news._parse_feed(feed, 2)], ["https://b.example/p.html"])
+    out = []
+    say = lambda *args, **kw: out.append(" ".join(str(a) for a in args))
+    saved = swap(rss_news, {"CONFIG_FILE": TMP, "save_json": lambda path, data: False, "print": say})
+    try:
+        check("a failed save is no success", (rss_news.add_feed("Mine", "https://m.example/rss"), out), (False, []))
+    finally:
+        unswap(rss_news, saved)
+        rm_tmp(TMP)
+
+    class DnsDown:
+        def request(self, method, url, **kw):
+            raise OSError(-2)
+
+    saved = swap(rss_news, {"print": say})
+    try:
+        rss_news._fetch_feed("F", "https://f.example", 2, DnsDown())
+    finally:
+        unswap(rss_news, saved)
+    check("errors in words", out[-1], "Fetch err: DNS failed")
 
 
 def test_clean_text():

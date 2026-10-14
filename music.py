@@ -22,10 +22,11 @@ from pico_utils import screen_header as _screen_header, sleep_ms as _sleep_ms
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import title_bar as _title_bar, wait_key as _wait_key
 from pico_utils import set_status_extra as _set_status_extra, set_tick as _set_tick
+from pico_utils import sort_by as _sort_by
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.3"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 4096  # samples per DMA buffer: 186 ms at 22,050 Hz
 STEP = 1024  # samples read and converted per pump step
@@ -100,6 +101,10 @@ def wav_info(f):
             f.seek(offset)
             if end is not None and end - offset < size:
                 size = end - offset  # streamed or cut files
+            if size < fmt[0] * fmt[2] // 8:
+                # not one frame: the player would start a buffer it never
+                # filled (a click from the stale word)
+                raise ValueError("no audio data")
             return fmt + (offset, size)
         else:
             f.seek(size + (size & 1), 1)
@@ -216,8 +221,7 @@ def songs(dirs=MUSIC_DIRS):
             if is_dir or name.startswith(".") or not name.lower().endswith(".wav"):
                 continue
             found.append((_clean(name[:-4]), folder.rstrip("/") + "/" + name, size))
-    found.sort(key=lambda song: song[0].lower())
-    return found
+    return _sort_by(found, lambda song: song[0].lower())
 
 
 # ── hardware ────────────────────────────────────
@@ -302,7 +306,10 @@ def _drain(ch):
 # ── playing ─────────────────────────────────────
 
 
-def _draw(name, info, total_s):
+_KEYS = (("Space", "pause"), ("←→", "track"), ("+/-", "vol"), ("b", "background"), ("q", "stop"))
+
+
+def _draw(name, info, total_s, background=True):
     channels, rate, bits = info[:3]
     _screen_header("Music")
     print("\x1b[?25l", end="")  # no blinking cursor while playing
@@ -311,13 +318,8 @@ def _draw(name, info, total_s):
     if rate * channels * bits // 8 > MAX_BYTES_PER_S:
         print(_paint("   High rate: it may stutter (22050 Hz is plenty)", BYELLOW))
     print("\x1b[11;1H" + _paint("─" * DISPLAY_WIDTH, GREY))
-    print(
-        "  ".join(
-            _paint(k, BYELLOW) + " " + v
-            for k, v in (("Space", "pause"), ("←→", "track"), ("+/-", "vol"), ("b", "background"), ("q", "stop"))
-        ),
-        end="",
-    )
+    keys = _KEYS if background else [pair for pair in _KEYS if pair[0] != "b"]
+    print("  ".join(_paint(k, BYELLOW) + " " + v for k, v in keys), end="")
 
 
 def _status(played_s, total_s, paused, under):
@@ -399,7 +401,8 @@ class Player:
             if self.sd is not None:
                 self.sd.init_spi(SD_BAUDRATE)
             self.f.seek(self.offset)
-            self.ch = [rp2.DMA(), rp2.DMA()]
+            for _ in (0, 1):  # one at a time: stop() closes what was claimed
+                self.ch.append(rp2.DMA())
             write = _reg(_AUDIO, _CC)
             for k in (0, 1):
                 self.ch[k].config(read=self.bufs[k], write=write, count=1, ctrl=self._ctrl(k, None))
@@ -543,11 +546,12 @@ class Player:
 # ── playing ─────────────────────────────────────
 
 
-def _play_ui(p):
+def _play_ui(p, background=True):
     """The now-playing screen over a started Player. Returns "end", "next",
-    "prev", "quit" or "back" (b: it goes on playing in the background)."""
+    "prev", "quit" or "back" (b, with `background`: it goes on playing in the
+    background)."""
     global _volume
-    _draw(p.name, (p.channels, p.rate, p.bits), p.total / p.rate)
+    _draw(p.name, (p.channels, p.rate, p.bits), p.total / p.rate, background)
     shown = None
     polled = _ticks_ms()
     while True:
@@ -565,7 +569,7 @@ def _play_ui(p):
             return "next"
         if key in ("left", "p"):
             return "prev"
-        if key == "b":
+        if key == "b" and background:
             return "back"
         if key == " ":
             p.pause(not p.paused)
@@ -587,16 +591,15 @@ def _play_ui(p):
 
 def play_file(path, name=None):
     """Play one WAV file in the foreground. Returns "end", "next", "prev" or
-    "quit". Space pauses, +/- volume, left/right track, q stops."""
+    "quit". Space pauses, +/- volume, left/right track, q stops. No b: from
+    the REPL nothing would pump it in the background (b left the player
+    running, its DMA channels, file and SD clock taken)."""
     p = Player(path, name).start()
-    result = "quit"
     try:
-        result = _play_ui(p)
+        return _play_ui(p, background=False)
     finally:
         print("\x1b[?25h", end="")
-        if result != "back":
-            p.stop()
-    return result if result != "back" else "quit"
+        p.stop()
 
 
 # ── in the background ───────────────────────────
@@ -697,22 +700,29 @@ def player(start=0):
                 continue
         while 0 <= pos < len(tracks):
             result = "quit"
+            failed = None
             try:
                 if p is None:
                     p = Player(tracks[pos][1], tracks[pos][0]).start()
                 result = _play_ui(p)
             except (OSError, ValueError, MemoryError) as error:
-                print("\x1b[13;1H" + _paint("Can't play: {}".format(error), BRED))
-                _wait_key()
+                failed = error
             finally:
+                # Stopped whichever way the screen ends (q, an error, Ctrl+C,
+                # a USB host taking over), unless b keeps it playing. Left to
+                # the garbage collector, its DMA channels would be closed, so
+                # aborted, while still busy (erratum E5, see _drain).
                 print("\x1b[?25h", end="")
-            if result == "back" and p is not None:
+                if result != "back" and p is not None:
+                    p.stop()
+                    p = None
+            if failed is not None:
+                print("\x1b[13;1H" + _paint("Can't play: {}".format(failed), BRED))
+                _wait_key()
+            if result == "back":
                 _bg_start(p, tracks, pos)
                 _clear_screen()
                 return None
-            if p is not None:
-                p.stop()
-                p = None
             if result == "quit":
                 break
             pos += -1 if result == "prev" else 1

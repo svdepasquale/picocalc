@@ -53,6 +53,12 @@ def test_calc_huge_ints():
         check("negative too", sc._format_result(-big), "too large to show")
         check("170! still shown", sc._format_result(sc._calc_factorial(170), 12), "7.257416e306")
         check("2^1000 still shown", sc._format_result(2 ** 1000, 12), "1.071509e301")
+        check("a carry to e10 still fits", [len(sc._fit_int(v, w)) for v, w in ((-(10**10 - 1), 10), (10**100 - 1, 50))], [10, 50])
+        try:
+            sc._calc_factorial(2.5)
+            check("2.5! refused", "2", "ValueError")
+        except ValueError:
+            pass
         del sc._HISTORY[:]
         sc._store("10**1000", big)
         check("ans keeps it", sc._LAST == big, True)
@@ -169,9 +175,10 @@ def test_app_discover_and_run():
         write_file(folder + "/notes.txt", "x")
         write_file(folder + "/boom.py", "1/0\n")
         write_file(folder + "/leave.py", "import sys\nsys.exit()\n")
+        write_file(folder + "/GAME.PY", "x = 1\n")  # how FAT lists an 8.3 name
         found = apps.discover((folder,))
         names = [app[0] for app in found]
-        check("sorted, dot files and non-py skipped", names, ["_tmp_helper", "Alpha", "beta", "boom", "leave"])
+        check("sorted, dot files and non-py skipped", names, ["_tmp_helper", "Alpha", "beta", "boom", "GAME", "leave"])
         check("header fields", found[1][:3], ("Alpha", "Games", "fun"))
         keys_from(b" ")
         check("runs as main", apps.run_app(folder + "/zeta.py"), True)
@@ -191,6 +198,20 @@ def test_app_discover_and_run():
         if hasattr(pu, "_APP_RAN"):
             del pu._APP_RAN
         rm_tree(folder)
+
+
+def test_app_error_printed_clean():
+    # an app's traceback names its file and carries its message: both are
+    # text from the SD card, so no escape reaches the screen
+    import apps
+
+    out = []
+    saved = swap(apps, {"print": lambda *args, **kw: out.append(" ".join(str(a) for a in args))})
+    try:
+        apps._print_error(ValueError("\x1b[40;1H\x1bc boom"))
+    finally:
+        unswap(apps, saved)
+    check("cleaned", ("\x1b" in "".join(out), "boom" in "".join(out)), (False, True))
 
 
 def test_app_puts_back_cwd_and_console():
@@ -239,6 +260,50 @@ def test_app_puts_back_cwd_and_console():
 
 
 # files
+
+
+def test_sort_by_makes_each_key_once():
+    # MicroPython's sort calls its key at every comparison and pivots on the
+    # last item: 300 names already in order took 45,149 key calls
+    calls = [0]
+
+    def key(name):
+        calls[0] += 1
+        return name.lower()
+
+    names = ["Track {:03d}".format(i) for i in range(300)]
+    check("in order", pu.sort_by(names, key), names)
+    check("one key call each", calls[0], 300)
+    check("reversed", pu.sort_by(names[::-1], key), names)
+    check("ties keep their order", pu.sort_by(["b", "a", "B", "A"], lambda s: s.lower()), ["a", "A", "b", "B"])
+    check("no key: the items", pu.sort_by(["b", "c", "a"]), ["a", "b", "c"])
+    check("empty", pu.sort_by([], key), [])
+
+
+def test_files_browse_from_a_bad_path_ends():
+    # parent("nope") is "nope": a relative start that failed to list looped
+    import files
+
+    calls = [0]
+
+    def no_list(folder):
+        calls[0] += 1
+        if calls[0] > 20:
+            raise RuntimeError("looped")
+        raise OSError(2, "no such folder")
+
+    saved = swap(files, {"entries": no_list, "_wait_key": lambda *args: None, "print": lambda *args, **kw: None})
+    try:
+        try:
+            got = files.browse("nope")
+        except RuntimeError as error:
+            got = str(error)
+        check("climbs to / and ends", (got, calls[0] < 20), (None, True))
+    finally:
+        unswap(files, saved)
+    line = "".join(chr(65 + i % 26) for i in range(1000))
+    lines = files.text_lines(line, 52)
+    check("a long line cut whole", ("".join(lines), [len(l) for l in lines[:-1]] == [52] * 19, len(lines[-1])), (line, True, 12))
 
 
 def test_files_paths_and_listing():

@@ -42,6 +42,8 @@ def test_wav_info():
         ("float rejected", _wav_bytes(1, 22050, 32, data, kind=3)),
         ("24-bit rejected", _wav_bytes(1, 22050, 24, data)),
         ("not a WAV", b"ID3" + bytes(40)),
+        ("no frames rejected", _wav_bytes(2, 22050, 16, b"")),
+        ("less than a frame rejected", _wav_bytes(2, 22050, 16, b"\x01\x02\x03")),
     ):
         try:
             music.wav_info(io.BytesIO(blob))
@@ -388,6 +390,8 @@ def test_music_keys_ramp_memory():
     rights = [word >> 16 for word in down]
     steps = [a - b for a, b in zip(rights, rights[1:])]
     check("right side slides down", (min(steps) >= 0, max(steps) <= 10), (True, True))
+    result, sim = _play_sim(10 * 256 + 37, 4000, 200, keys=[(300, "b")])
+    check("play_file: b ignored (nothing would pump it)", (result, sim.file.closed, sim.errors), ("end", True, []))
 
     def no_memory(n):
         raise MemoryError("memory allocation failed")
@@ -415,7 +419,8 @@ def test_music_keys_ramp_memory():
     )
     try:
         check("player stays up on MemoryError", music.player(), None)
-        check("told, then back to the list", ("Can't play: memory" in out[0], waits, picks), (True, [1], []))
+        told = [line for line in out if "Can't play: memory" in line]
+        check("told, then back to the list", (len(told), waits, picks), (1, [1], []))
     finally:
         unswap(music, saved)
 
@@ -506,6 +511,44 @@ def test_music_background_playlist():
         check("files closed", [f.closed for f in files], [True, True])
         check("tick and mark gone", (pu._TICK[0], pu._EXTRA[0]), (None, ""))
     finally:
+        _bg_teardown(saved, modules)
+
+
+def test_music_player_interrupted():
+    # Ctrl+C (or a USB host taking over) on the now-playing screen: the player
+    # stops there, drained, instead of being left to the garbage collector,
+    # whose close() aborts channels that may still be busy
+    import music
+
+    sim, files, saved, modules = _bg_setup(10 * 256, 4000, 200)
+
+    def key():
+        sim.run(300)
+        if sim.t >= 200000:
+            raise KeyboardInterrupt
+        return None
+
+    picks = [("enter", 0)]
+    more = swap(
+        music,
+        {
+            "songs": lambda: [("a", "/sd/music/a.wav", 10)],
+            "_pick": lambda title, labels, hints=None, pos=0: picks.pop(0),
+            "_poll_key": key,
+            "_screen_header": lambda *args: None,
+        },
+    )
+    try:
+        try:
+            music.player()
+            got = "returned"
+        except KeyboardInterrupt:
+            got = "interrupted"
+        check("Ctrl+C goes through", got, "interrupted")
+        check("stopped: file closed, nothing aborted", (files[0].closed, sim.errors), (True, []))
+        check("pacer off, channels idle", (sim.mem.get(sim.csr, 0) & 1, [d.busy for d in sim.dmas]), (0, [False, False]))
+    finally:
+        unswap(music, more)
         _bg_teardown(saved, modules)
 
 

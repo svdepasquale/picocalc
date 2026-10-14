@@ -1,9 +1,8 @@
 import gc
-import time
 
 from pico_utils import clean as _clean, clip as _clip, poll_key as _poll_key
 from pico_utils import paged_print as _paged_print
-from pico_utils import paged_lines as _paged_lines
+from pico_utils import paged_lines as _paged_lines, wrap_text as _wrap_text
 from pico_utils import preview_print as _preview_print
 from pico_utils import browse_items as _browse_items
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
@@ -34,7 +33,7 @@ AI_TIMEOUT = 60
 MAX_LINE_BYTES = 8192  # one streamed line
 MAX_STREAM_MS = 120000  # a reply that streams longer is stopped
 KEY_POLL_MS = 50  # q/Esc while a reply streams
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True
@@ -71,14 +70,17 @@ def _render_response_summary(item, pos, total):
 
 
 def _render_response_detail(item, pos, total):
+    # One pager over all of it: two (question, then answer) put 33 rows on
+    # a 30-row screen before the first pause, the model and Q: scrolled off.
     _screen_header("AI Detail")
-    print("[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24)))
-    print("ms:", item.get("elapsed_ms", 0))
-    print("Q:")
-    _paged_print(item.get("prompt", ""))
-    print("---")
-    print("A:")
-    _paged_print(item.get("answer", ""))
+    lines = ["[{}/{}] {}".format(pos + 1, total, _clip(item.get("model", "?"), 24))]
+    lines.append("ms: {}".format(item.get("elapsed_ms", 0)))
+    lines.append("Q:")
+    lines.extend(_wrap_text(item.get("prompt", "")))
+    lines.append("---")
+    lines.append("A:")
+    lines.extend(_wrap_text(item.get("answer", "")))
+    _paged_lines(lines)
 
 
 def _load_config():
@@ -489,7 +491,9 @@ def _sse_text(raw, emit):
                 break
             delta = _delta_text(event)
             if delta:
-                delta = _clean(delta)  # an ESC in a reply would drive the terminal
+                # an ESC in a reply would drive the terminal; and the printer
+                # counts columns: … and € are drawn as three, a tab as a stop
+                delta = _clean(delta).replace("\t", "    ").replace("…", "...").replace("€", "EUR")
                 emit(delta)
                 parts.append(delta)
                 size += len(delta)
@@ -501,7 +505,18 @@ def _sse_text(raw, emit):
     return "".join(parts)
 
 
-def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, raw=False):
+def _event_stream(response):
+    # The reply streams only if the server said so: one that ignores
+    # "stream": true answers plain JSON, whose text the stream reader threw
+    # away ("No text in response"). No type given: as asked.
+    headers = getattr(response, "headers", None) or {}
+    for name in headers:
+        if name.lower() == "content-type":
+            return "event-stream" in str(headers[name]).lower()
+    return True
+
+
+def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None):
     requests = _http_module()
     if requests is None:
         return None
@@ -583,7 +598,7 @@ def ask(prompt, model=None, max_tokens=220, temperature=0.2, use_memory=None, ra
             else:
                 print("Bad response")
             return None
-        if stream:
+        if stream and _event_stream(response):
             printer = _StreamPrinter()
             text = _sse_text(response.raw, printer)
             printer.close()

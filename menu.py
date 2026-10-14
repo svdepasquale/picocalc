@@ -13,12 +13,12 @@ from pico_utils import wait_key as _wait_key, wifi_connected as _wifi_connected
 from pico_utils import refresh_status as _refresh_status, status_version as _status_version
 from pico_utils import HostTakeover as _HostTakeover, wrap_text as _wrap_text
 from pico_utils import apply_settings as _apply_settings, screen_on as _screen_on
-from pico_utils import activity as _activity
+from pico_utils import activity as _activity, background_work as _background_work
 from pico_utils import settings as _settings, ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import BLACK, BCYAN, BWHITE, BYELLOW, GREY, WHITE
 
 
-MODULE_VERSION = "2026-10-12.3"
+MODULE_VERSION = "2026-10-12.4"
 LOW_MEMORY = 60000  # below this, idle apps are unloaded before opening another
 REFRESH_MS = 30000  # status bar refresh while the menu waits
 WAIT_MS = 1000  # the menu looks at the status this often (a background join)
@@ -57,13 +57,26 @@ def _mem_free():
 def _load(name):
     gc.collect()
     if name not in sys.modules and _mem_free() < LOW_MEMORY:
+        work = _background_work()
         for other in _APP_MODULES:
-            if other == "music" and _music_playing():
-                continue  # playing in the background: its state lives there
-            if other != name and other in sys.modules:
+            mod = sys.modules.get(other)
+            if other != name and mod is not None and not _working(mod, work):
                 del sys.modules[other]
         gc.collect()
     return __import__(name)
+
+
+def _working(mod, work):
+    # A module whose background work is running (the music, the Wi-Fi join,
+    # the quiet NTP sync) stays: unloaded, it frees nothing, since the work
+    # keeps its globals, and a new import makes a second copy that can't
+    # reach the running one (its stop_join() left the old join switching
+    # networks under a connect by hand).
+    for value in mod.__dict__.values():
+        for fn in work:
+            if value is fn:
+                return True
+    return False
 
 
 def _choose(title, body, keys):
@@ -301,7 +314,7 @@ def _hint_apps():
     count = 0
     for folder in ("/sd/apps", "/apps"):
         try:
-            count += len([n for n in os.listdir(folder) if n.endswith(".py")])
+            count += len([n for n in os.listdir(folder) if n.lower().endswith(".py") and n[0] != "."])
         except OSError:
             pass
     return "{} found".format(count) if count else ""

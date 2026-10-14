@@ -12,7 +12,7 @@ import os
 from pico_utils import DISPLAY_WIDTH
 from pico_utils import check_wifi as _check_wifi, clean as _clean, clip as _clip
 from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
-from pico_utils import paint as _paint, poll_key as _poll_key
+from pico_utils import paint as _paint, poll_key as _poll_key, sort_by as _sort_by
 from pico_utils import screen_header as _screen_header, ticks_diff as _ticks_diff
 from pico_utils import ticks_add as _ticks_add, ticks_ms as _ticks_ms, wait_key as _wait_key
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
@@ -23,7 +23,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 PORT = 80
 SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -334,7 +334,7 @@ def _error(conn, status, text):
 def _listing(root, folder, name):
     dirs = [""]
     try:
-        for entry in sorted(os.listdir(root)):
+        for entry in _sort_by(os.listdir(root)):
             if valid_name(entry) and _is_dir(root.rstrip("/") + "/" + entry):
                 dirs.append(entry)
     except OSError:
@@ -342,7 +342,7 @@ def _listing(root, folder, name):
     files = []
     more = False
     try:
-        for entry in sorted(os.listdir(folder)):
+        for entry in _sort_by(os.listdir(folder)):
             path = folder.rstrip("/") + "/" + entry
             if entry.startswith(".") or not _is_file(path):
                 continue
@@ -374,7 +374,9 @@ def handle(conn, state):
             200,
             PAGE,
             "text/html; charset=utf-8",
-            "Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'\r\nReferrer-Policy: no-referrer\r\n",
+            # frame-ancestors: no other page frames this one (a PIN typed
+            # into a framed copy); default-src does not cover it
+            "Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\nReferrer-Policy: no-referrer\r\n",
         )
     if not path.startswith("/api/"):
         return _error(conn, 404, "not found")
@@ -392,7 +394,12 @@ def handle(conn, state):
         return _error(conn, 404, "no such folder")
     name = args.get("name")
     if path == "/api/ls" and method == "GET":
-        return _send(conn, 200, _listing(state["root"], folder, args.get("dir", "")))
+        try:
+            listing = _listing(state["root"], folder, args.get("dir", ""))
+        except MemoryError:  # thousands of names: it escaped serve() and closed it
+            gc.collect()
+            return _error(conn, 500, "too many files to list")
+        return _send(conn, 200, listing)
     if not valid_name(name):
         return _error(conn, 400, "bad name")
     target = folder.rstrip("/") + "/" + name
@@ -589,8 +596,8 @@ def serve(port=PORT, root=SD_ROOT):
                 continue
             try:
                 handle(_Client(conn, state), state)
-            except OSError as error:
-                _log(state, "dropped: {}".format(error))
+            except (OSError, MemoryError) as error:  # one request lost, not the server
+                _log(state, "dropped: {}".format(str(error) or "out of memory"))
             finally:
                 conn.close()
                 gc.collect()

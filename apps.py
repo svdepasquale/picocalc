@@ -9,11 +9,11 @@ import sys
 
 from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
 from pico_utils import paint as _paint, pick as _pick, screen_header as _screen_header
-from pico_utils import clean as _clean, wait_key as _wait_key
+from pico_utils import clean as _clean, sort_by as _sort_by, wait_key as _wait_key
 from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.3"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
@@ -64,24 +64,29 @@ def discover(dirs=APP_DIRS):
         except OSError:
             continue
         for fname in names:
-            if not fname.endswith(".py") or fname.startswith("."):
+            if not fname.lower().endswith(".py") or fname.startswith("."):  # GAME.PY: an 8.3 name
                 continue
             path = folder.rstrip("/") + "/" + fname
             info = _read_header(path) or (fname[:-3], "", "")
             # names and descriptions are shown: no control characters
             found.append((_clean(info[0]), _clean(info[1]), _clean(info[2]), path))
-    found.sort(key=lambda app: app[0].lower())
-    return found
+    return _sort_by(found, lambda app: app[0].lower())
 
 
 # ── running ─────────────────────────────────────
 
 
 def _print_error(error):
+    # The traceback names the app's file and carries its message: printed
+    # through clean(), like any text from the SD card.
     try:
-        sys.print_exception(error)
+        import io
+
+        out = io.StringIO()
+        sys.print_exception(error, out)
+        print(_clean(out.getvalue()), end="")
     except AttributeError:  # CPython
-        print("{}: {}".format(type(error).__name__, error))
+        print(_clean("{}: {}".format(type(error).__name__, error)))
 
 
 def _compile(path):

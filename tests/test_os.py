@@ -337,4 +337,67 @@ def test_typing_is_activity():
     with_pico(body, keyboard=mcu)
 
 
+class IdleCon:
+    # gfx's console as readinto() sees it: up, its cursor already drawn
+    beam = (0, 0, 0, 0)
+
+
+class QuietTerm:
+    # the firmware terminal: the bytes given, then nothing
+    def __init__(self, keys=b""):
+        self.keys = list(keys)
+
+    def readinto(self, buf):
+        if not self.keys:
+            return 0
+        buf[0] = self.keys.pop(0)
+        return 1
+
+
+def test_input_waits_do_the_idle_work():
+    # input() reads through _ScreenTerm.readinto(), not _key_byte(): under the
+    # launcher it runs the tick and the services too (in the calculator the
+    # screen never went off, the music in the background stopped), a tick
+    # that raises is dropped, and a key that wakes the screen does nothing
+    ran = []
+    saved = pu._CONSOLE[0]
+
+    def boom():
+        raise OSError("left behind by an app")
+
+    def body(fake):
+        pu._SETTINGS[0] = dict(pu.SETTINGS_DEFAULTS, dim_s=0, sleep_s=0)
+        buf = bytearray(1)
+        term = pu._ScreenTerm(QuietTerm())
+        pu.set_tick(lambda: ran.append("tick"))
+        pu.add_service(lambda now, waiting: ran.append(waiting))
+        long_ago = pu.ticks_add(pu.ticks_ms(), -1000)
+        pu._CONSOLE[0] = None
+        pu._IDLE[1] = pu._LAST_TICK[0] = long_ago
+        term.readinto(buf)
+        check("at the REPL nothing runs", ran, [])
+        pu._CONSOLE[0] = IdleCon()
+        term.readinto(buf)
+        check("under the launcher: the tick, the services (a real wait)", ran, ["tick", True])
+        pu.set_tick(boom)
+        pu._LAST_TICK[0] = long_ago
+        term.readinto(buf)
+        check("a tick that raises is dropped", pu._TICK[0], None)
+
+        def polls_keys(now, waiting):
+            raise pu.HostTakeover  # an app's service that polled keys
+
+        pu.add_service(polls_keys)
+        pu._IDLE[1] = long_ago
+        check("a host seen in there stays in there", term.readinto(buf), 0)
+        pu._OFF[0] = [None, None, None, pu.ticks_ms(), False, None]
+        term = pu._ScreenTerm(QuietTerm(b"\x1b[A"))
+        check("the arrow that wakes the screen goes whole", (term.readinto(buf), pu.screen_is_off(), term._term.keys), (None, False, []))
+
+    try:
+        with_pico(body)
+    finally:
+        pu._CONSOLE[0] = saved
+
+
 run(globals())

@@ -8,12 +8,17 @@ try:
 except ImportError:
     import json
 
+try:  # here, not in sort_by(): an import in a function costs ~7 ms a call on the device
+    from random import getrandbits as _getrandbits
+except ImportError:
+    _getrandbits = None
+
 
 HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-10-12.4"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -281,17 +286,34 @@ class _ScreenTerm(_IOBase):
                 _show_cursor()  # input() reads: the console's cursor
             n = self._term.readinto(buf)
             if n:
-                # typing at the REPL or into input() is activity too: it
-                # wakes the screen (that key still goes to the reader)
+                # typing at the REPL or into input() is activity too
                 _IDLE[0] = ticks_ms()
-                if _OFF[0] is not None or _DIM[0] is not None:
+                if _OFF[0] is not None:
+                    # the key that wakes the screen does nothing else, as in
+                    # key waits: it and the rest of its sequence go
                     screen_on()
+                    self._drain(buf)
+                    return None
+                if _DIM[0] is not None:
+                    screen_on()
+            elif con is not None:
+                _input_idle()  # input() under the launcher waits here
             return n
         except KeyboardInterrupt:
             buf[0] = 3
             return 1
         except Exception:
             return None
+
+    def _drain(self, buf):
+        # Straight from the terminal: _drain() polls stdin, and the
+        # HostTakeover it can raise would make dupterm detach the screen.
+        quiet = ticks_ms()
+        while ticks_diff(ticks_ms(), quiet) < _ESC_WAIT_MS:
+            if self._term.readinto(buf):
+                quiet = ticks_ms()
+            else:
+                sleep_ms(5)
 
     def ioctl(self, req, arg):
         # No poll support: without this method each select on stdin raised
@@ -628,6 +650,26 @@ def format_bytes(size):
     return "{}MB".format(value // (1024 * 1024))
 
 
+def sort_by(items, key=None):
+    """A new list of items in the order of key(item) (of the items, with no
+    key), ties in their order. MicroPython's sort calls the key at every
+    comparison and pivots on the last item, so a list already in order
+    (littlefs lists names sorted, FAT in the order the files were copied)
+    took n*n/2 key calls: 45,149 for 300 names, seconds on the device, and
+    n*n/2 comparisons even with no key. Here each key is made once and the
+    items are shuffled before the sort: a random pivot, n log n comparisons."""
+    if key is None:
+        decorated = [(item, i, item) for i, item in enumerate(items)]
+    else:
+        decorated = [(key(item), i, item) for i, item in enumerate(items)]
+    if _getrandbits is not None:
+        for i in range(len(decorated) - 1, 0, -1):
+            j = _getrandbits(16) % (i + 1)
+            decorated[i], decorated[j] = decorated[j], decorated[i]
+    decorated.sort()
+    return [entry[2] for entry in decorated]
+
+
 def ticks_ms():
     if hasattr(time, "ticks_ms"):
         return time.ticks_ms()
@@ -725,7 +767,7 @@ def _key_byte(timeout_ms=None):
     while True:
         byte = _poll_byte()
         if byte is None and _TICK[0] is not None:
-            _TICK[0]()  # the music in the background: its buffers, a step
+            _tick()  # the music in the background: its buffers, a step
         now = ticks_ms()
         if byte is not None:
             if _awake(byte, now):
@@ -1329,8 +1371,48 @@ _TICK = [None]  # run on every pass of a key wait and on every poll
 def set_tick(fn):
     """fn() on every pass of a key wait (~10 ms) and on every poll; None
     removes it. For work that cannot wait SERVICE_MS: the music in the
-    background. It must not raise, and must be short."""
+    background. Keep it short; one that raises is dropped."""
     _TICK[0] = fn
+
+
+def _tick():
+    # Dropped if it raises, as a service is: it runs in every key wait, and
+    # an app from the SD card can leave one behind (it took the launcher
+    # down at its next key read, and every `import go` after).
+    try:
+        _TICK[0]()
+    except Exception:
+        _TICK[0] = None
+
+
+_TICK_MS = 10  # the tick's pace while input() waits (key waits sleep 10 ms)
+_LAST_TICK = [0]
+
+
+def _input_idle():
+    # input() reads keys through _ScreenTerm.readinto(), not _key_byte():
+    # under the launcher (the calculator, AI chat, notes) the screen never
+    # dimmed or went off there, the music in the background stopped and the
+    # Wi-Fi join waited. Nothing here may read stdin (see _ScreenTerm._drain):
+    # the toolkit's services and the music's tick don't (checked 2026-10-12).
+    now = ticks_ms()
+    try:
+        if _TICK[0] is not None:
+            since = ticks_diff(now, _LAST_TICK[0])
+            if since >= _TICK_MS or since < 0:
+                _LAST_TICK[0] = now
+                _tick()
+        since = ticks_diff(now, _IDLE[1])
+        if since >= SERVICE_MS or since < 0:
+            _IDLE[1] = now
+            _services(now, True)
+    except HostTakeover:
+        # Only an app's service or tick that polls keys can raise it here:
+        # out of readinto() it would make dupterm detach the screen, and the
+        # host's bytes reach input() anyway, as they always did.
+        pass
+
+
 OFF_POLL_MS = 100  # key poll period while the screen is off
 DIM_LEVEL = 1  # backlight while dimmed
 WIFI_SLEEP_MS = 60000  # screen off this long in a key wait: Wi-Fi off too
@@ -1354,6 +1436,22 @@ def add_service(fn):
 def remove_service(fn):
     if fn in _HOOKS:
         _HOOKS.remove(fn)
+
+
+def speakers_busy():
+    """True while the music plays in the background: its DMA owns the
+    speakers' PWM slice, and a tone set up there (a game's blip, a beep)
+    silenced it for the rest of the track."""
+    music = sys.modules.get("music")
+    return music is not None and music.playing() is not None
+
+
+def background_work():
+    """What key waits run besides the keys: the services and the tick."""
+    work = list(_HOOKS)
+    if _TICK[0] is not None:
+        work.append(_TICK[0])
+    return work
 
 
 def activity():

@@ -96,6 +96,20 @@ def test_page_pin_and_lockout():
         check("wrong PIN", ask(state, "GET /api/ls HTTP/1.1\r\n\r\n")[0], 401)
         check("closed after ten", state["stop"] is not None, True)
         check("no PIN in replies", b"123456" in body, False)
+        client = FakeClient(b"GET / HTTP/1.1\r\n\r\n")
+        transfer.handle(client, new_state())
+        check("never framed", b"frame-ancestors 'none'" in client.out, True)
+        real = transfer._listing
+
+        def huge(root, folder, name):
+            raise MemoryError("memory allocation failed")
+
+        transfer._listing = huge
+        try:
+            got = ask(new_state(), "GET /api/ls?dir= HTTP/1.1\r\nX-PIN: 123456\r\n\r\n")
+        finally:
+            transfer._listing = real
+        check("a folder too big is an answer", (got[0], b"too many files" in got[1]), (500, True))
     finally:
         rm_tree(ROOT)
 

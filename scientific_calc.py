@@ -1,11 +1,11 @@
 import gc
 import math
 
-from pico_utils import clip, paged_print, paged_lines, safe_input, clear_screen, screen_header
+from pico_utils import clip, paged_lines, safe_input, clear_screen, screen_header
 from pico_utils import DISPLAY_WIDTH
 
 
-MODULE_VERSION = "2026-10-07.1"
+MODULE_VERSION = "2026-10-12.1"
 MAX_HISTORY = 20
 MAX_EXPR_LEN = 160
 MAX_VARS = 50
@@ -51,6 +51,8 @@ def _fit_int(value, width):
         if len(str(head)) > keep:
             head //= 10
             exp += 1
+            if len(str(exp)) > len(str(exp - 1)):
+                head //= 10  # e9 became e10: one digit less (head is 10...0)
     head = str(head)
     mantissa = head[0] + ("." + head[1:] if len(head) > 1 else "")
     return "{}{}e{}".format(sign, mantissa, exp)
@@ -142,6 +144,8 @@ def _calc_factorial(n):
         val = int(n)
     except Exception as error:
         raise ValueError("Integer required.") from error
+    if val != n:  # int() cut 2.5 to 2 without a word
+        raise ValueError("Integer required.")
     if val < 0:
         raise ValueError("Non-negative required.")
     if val > 170:

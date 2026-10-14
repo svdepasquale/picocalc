@@ -1,5 +1,4 @@
 import gc
-import time
 
 from pico_utils import clean as _clean, clip as _clip
 from pico_utils import load_json, save_json, http_module as _http_module, check_wifi
@@ -10,7 +9,7 @@ from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 
 
 CONFIG_FILE = "weather_config.json"
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-12.2"
 API_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 DEFAULT_LAT = 41.9
@@ -304,7 +303,10 @@ def _fetch(days):
 def _weather(days, reuse=False):
     # A new request; with reuse, the last one if it is recent and has the days.
     last = _LAST_FETCH
-    if reuse and last[2] is not None and _ticks_diff(_ticks_ms(), last[2]) < REUSE_MS:
+    # 0 <= age: ticks wrap every 2**30 ms, and 6 to 12 days after the last
+    # fetch the age reads negative, which passed for fresh
+    age = _ticks_diff(_ticks_ms(), last[2]) if last[2] is not None else -1
+    if reuse and 0 <= age < REUSE_MS:
         if last[0] is None or last[1] >= days:
             return last[0]
     data = _fetch(days)

@@ -123,6 +123,29 @@ def _with_ai(config, body):
     return out
 
 
+def test_ai_json_reply_widths_and_one_pager():
+    # a server that ignores "stream": true answers JSON: its text was lost
+    reply = HttpResponse(200, b'{"choices":[{"message":{"content":"plain"}}]}')
+    reply.headers = {"Content-Type": "application/json"}
+    req = ScriptedRequests([reply])
+
+    def run():
+        ai._http_module = lambda: req
+        check("JSON reply with stream on", ai.ask("q"), "plain")
+
+    _with_ai({"api_key": "k"}, run)
+    got = []
+    body = 'data: {"choices":[{"delta":{"content":"5\u20ac\\tok\u2026"}}]}\n\n'.encode()
+    check("drawn widths", ai._sse_text(ChunkRaw(body), got.append), "5EUR    ok...")
+    shown = []
+    saved = swap(ai, {"_paged_lines": shown.extend, "_screen_header": lambda *args: None})
+    try:
+        ai._render_response_detail({"model": "m", "elapsed_ms": 7, "prompt": "q?", "answer": "a."}, 0, 1)
+    finally:
+        unswap(ai, saved)
+    check("detail: one pager", shown, ["[1/1] m", "ms: 7", "Q:", "q?", "---", "A:", "a."])
+
+
 def test_ai_body_is_utf8_bytes():
     # requests sends len(data) as Content-Length: a str counts characters,
     # and MicroPython's json writes accents as raw UTF-8
@@ -291,6 +314,9 @@ def test_weather_one_request():
         check("new place asks again", len(req.calls), 5)
         both = weather.report()
         check("report: both, one request", (both["now"]["desc"], len(both["days"]), len(req.calls)), ("Partly cloudy", 3, 6))
+        clock[0] -= 1000  # 6 to 12 days on, the wrapped age reads negative
+        weather.forecast(3)
+        check("a negative age is not fresh", len(req.calls), 7)
 
     _with_weather(run)
 
@@ -593,6 +619,40 @@ def test_wifi_says_why():
     joined = FakeWlan(reach={"home": 3})
     got = _with_wifi(joined, up)
     check("connected screen", got["out"], ["WiFi: connected", "SSID: home", "IP: 10.0.0.7"])
+
+
+class LateWlan(FakeWlan):
+    # status() first reads `first` after connect(): the last try's failure
+    # (traced on the device), or 2 (joined, no address yet) for a while
+    def __init__(self, items, reach, first):
+        FakeWlan.__init__(self, items, reach)
+        self.first = first
+
+    def connect(self, ssid, key):
+        FakeWlan.connect(self, ssid, key)
+        self.readings = list(self.first)
+
+    def status(self):
+        return self.readings.pop(0) if self.readings else self.state
+
+
+def test_wifi_waits_out_stale_and_slow_statuses():
+    stale = LateWlan([_scan_item(b"home", -50)], {"home": 3}, [-3, -3])
+
+    def saved():
+        check("stale 'wrong password' waited out", wifi_manager.connect_saved_networks(stale, {"home": "p1"}), True)
+
+    got = _with_wifi(stale, saved)
+    check("one try", stale.joins, [("home", "p1")])
+    slow = LateWlan([_scan_item(b"cafe", -50)], {"cafe": 3}, [2] * 20)  # 2 past the 8 s
+
+    def chosen():
+        check("slow address: joined", wifi_manager.auto_connect_or_prompt(), True)
+        check("and its key saved", wifi_manager.load_credentials(), {"cafe": "pw"})
+
+    _with_wifi(slow, chosen, keys=["1"], line="pw")
+    spaced = FakeWlan([_scan_item(b" Cafe ", -50)])
+    check("spaces kept in a name", wifi_manager.scan_networks(spaced)[0][0], " Cafe ")
 
 
 def test_wifi_open_networks_and_nine():
