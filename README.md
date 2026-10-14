@@ -15,6 +15,32 @@ Wi-Fi + AI + RSS/Miniflux + Clock + Calendar + Notes + Weather + Scientific Calc
   and shows accented text correctly (see "Screen" below)
 - every module still works from the REPL with short aliases
 
+<p>
+<img src="docs/screens/launcher.png" width="24%" alt="The launcher">
+<img src="docs/screens/tetris.png" width="24%" alt="Tetris">
+<img src="docs/screens/space.png" width="24%" alt="Space Raid">
+<img src="docs/screens/weather.png" width="24%" alt="Weather">
+</p>
+
+## Quick install
+For a Pico 2W in the PicoCalc, with ClockworkPi's MicroPython firmware.
+
+1. Flash `picocalc-micropython-pico2w-*.uf2` from the
+   [latest release](../../releases/latest): hold BOOTSEL while plugging in
+   the USB cable (or `machine.bootloader()` at the REPL), then copy the file
+   to the RP2350 drive. It is ClockworkPi's official firmware with the
+   flash-write hang fixed (see "Firmware" below); the files on the Pico stay,
+   and the official UF2 goes back on the same way. You can skip this step,
+   but on the official firmware a flash write can hang the PicoCalc, copying
+   the toolkit included.
+2. Unzip `picocalc-toolkit-*.zip` from the same release and copy the files
+   in its folder to the Pico's root with the PicoCalc switched on: Thonny's
+   Files panel, or `mpremote resume cp *.mpy *.py :` inside the folder.
+3. Switch the PicoCalc off and on: the launcher opens. `1`, then `c` joins
+   a Wi-Fi network.
+
+From the sources instead: "First-time setup" below, or `tools/deploy.sh`.
+
 ## Files
 - `default_style.py` → opens the launcher at power-on on the official firmware (see "Launcher")
 - `go.py` → `import go` opens the launcher
@@ -49,7 +75,8 @@ that firmware a write to the Pico's flash (saving notes or settings) can hang
 the device, because the screen refresh runs from the same flash. `tools/build_firmware.sh`
 rebuilds the same firmware with that fixed (see CLAUDE.md, Build and deploy):
 flash it with `machine.bootloader()` and a copy of the UF2 to the RP2350 drive;
-the files on the device stay.
+the files on the device stay. Each release carries the UF2 built this way and
+tested on a PicoCalc.
 
 Deploy with `tools/deploy.sh` (needs `mpremote` and `mpy-cross`: `brew install
 micropython`): it compiles the modules to `.mpy` for the firmware's bytecode
