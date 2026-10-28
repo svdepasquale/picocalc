@@ -731,7 +731,7 @@ has 10 seconds for a request and may not stall a transfer for longer.
 - Requests that carry a key (OpenRouter, a Miniflux token, a custom AI
   endpoint's key) to a server on the internet check its TLS certificate
   against four roots built into `pico_net.py` (Google Trust Services R1/R4,
-  ISRG X1/X2: OpenRouter and Let's Encrypt sites). That costs 1.4-2.6 s per
+  ISRG X1/X2: OpenRouter and Let's Encrypt sites). That costs 1.4-3.7 s per
   request and needs the clock set (the launcher sets it from NTP; the
   check tries once more itself). A server signed by another authority is
   refused with `certificate check failed` (until its root is added to
