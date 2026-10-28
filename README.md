@@ -218,15 +218,13 @@ Order of use:
 - Connect Wi-Fi first, then use AI commands.
 
 1. Make sure Wi-Fi is connected (`w.st()`).
-2. Ensure `urequests` exists on device.
-	- If missing, run: `import mip; mip.install('urequests')`
-3. Import AI module:
+2. Import AI module:
 	- `import openrouter_ai as ai`
-4. Save your key:
+3. Save your key:
 	- `ai.set_api_key('sk-or-v1-...')`
-5. (Optional) choose a model:
+4. (Optional) choose a model:
 	- `ai.set_model('openai/gpt-4o-mini')`
-6. Ask a question:
+5. Ask a question:
 	- `ai.ask('Explain DNS in simple words')`
 
 Default model: `anthropic/claude-sonnet-5.5` on OpenRouter ($2 / $10 per
@@ -285,15 +283,13 @@ Recommended UX on PicoCalc:
 Order of use:
 - Connect Wi-Fi first, then use RSS commands.
 
-1. Ensure `urequests` exists on device.
-	- If missing, run: `import mip; mip.install('urequests')`
-2. Import RSS module:
+1. Import RSS module:
 	- `import rss_news as n`
-3. Show current feed list:
+2. Show current feed list:
 	- `n.feeds()`
-4. Read latest previews:
+3. Read latest previews:
 	- `n.latest()`
-5. Open one item in detail:
+4. Open one item in detail:
 	- `n.read(1)`
 
 Manual feed management from PicoCalc:
@@ -542,7 +538,7 @@ Commands:
 
 ## First-time setup
 1. Upload the `.py` files of the repo root to the Pico root (not `tests/`),
-   e.g. `mpremote cp *.py :` (with the PicoCalc switched on: on USB power
+   e.g. `mpremote resume cp *.py :` (with the PicoCalc switched on: on USB power
    alone its keyboard controller is off and answers I2C errors).
 2. Switch the PicoCalc off and on: the launcher opens (or type `import go`).
    Press `1`, then `c` to pick a Wi-Fi network; the clock is set from NTP
@@ -766,7 +762,7 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - If AI says `clock not set: can't check the certificate`: Wi-Fi is up but NTP failed: Clock → `s`, then try again.
 - If AI says `No API key.`: run `ai.set_api_key('sk-or-v1-...')`.
 - If OpenRouter returns HTTP error: verify key/model and internet access.
-- If RSS says `Missing urequests.`: run `import mip; mip.install('urequests')`.
+- If a network app says `Missing urequests.`: `pico_net.py`, the toolkit's HTTP client, is missing on the Pico: copy it again.
 - If RSS returns no items: try `n.latest(1)` to test one source only.
 - If feed fails repeatedly: remove and re-add URL (`n.rm_feed(...)`, `n.add_feed(...)`).
 - If NTP sync fails: check Wi-Fi connection, retry `c.sync()`.
@@ -777,7 +773,6 @@ firmware; older driver builds keep it on flash. If yours is on flash, do
 - If screen and keyboard stop responding after Thonny or `mpremote` connected (or with the PicoCalc switched off): the firmware's terminal detached itself. `import go` from USB, or a reset, brings it back; once the toolkit is loaded it no longer happens.
 - If the launcher does not open at power-on: check that `default_style.py` and `go.py` are on the Pico (`import os; os.listdir()`). It only opens on a cold start, not after Ctrl+D or an `mpremote` soft reset.
 - After `mpremote`/Thonny took over, the PicoCalc is at the REPL: `import go`, or switch it off and on.
-- Old interactive UI stays on screen after exit: this is fixed in version 2026-03-28.3 (clear on exit).
 
 ## Known limitations
 - **Uptime**: `s.uptime()` resets after ~12-25 days (MicroPython `ticks_ms` overflow). Mitigated with `ticks_diff` but still wraps on very long runs.
@@ -813,9 +808,5 @@ import pico_utils as pu    # pu.backlight(n) pu.keyboard_light(n) pu.screen_off(
 ```
 
 ## Current version
-Check on device with `<module>.ver()`: `2026-10-12.1` for the modules
-changed or added in the 2026-10-11/12 round (`pico_utils`, `menu`,
-`wifi_manager`, `settings`, `cal`, `transfer`, `pico_net`, `rss_news`,
-`openrouter_ai`, `weather`, `files`, `sys_status`, `music`, `apps`),
-`2026-10-11.1` for `clock_ntp`, `2026-10-07.1` for the others,
-`2026-10-06.1` for `gfx_native`, `2026-10-06.7` for `gfx`.
+Check on the device with `<module>.ver()`: each app module carries its own
+version, `YYYY-MM-DD.N`, bumped whenever that module changes.
