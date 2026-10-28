@@ -7,7 +7,7 @@ even over http) and no timeout. Here:
 - TLS is verified against the roots below whenever a request carries a
   credential (Authorization, X-Auth-Token) to a public host: the OpenRouter
   and Miniflux keys. Public content (feeds, weather) stays unverified: each
-  verified handshake costs 1.4-2.6 s and 10-15 KB of heap on the device
+  verified handshake costs 1.4-3.7 s and 10-15 KB of heap on the device
   (measured 2026-10-11). The check needs the clock: it reads 2021 after
   power-on until NTP, and certificates are then "not yet valid".
 - Redirects: three at most, the same timeout each hop, credential headers
@@ -25,7 +25,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-10-28.1"
 USER_AGENT = "PicoCalc"
 TIMEOUT = 15
 MAX_BYTES = 65536  # what .content reads at most
