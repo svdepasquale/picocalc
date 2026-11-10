@@ -104,6 +104,22 @@ def test_scores_without_card():
     with_store(body, sd=False)
 
 
+def test_scores_from_flash_join_the_card():
+    def body():
+        write_file(_FILES[1], '{"tetris": 1200, "snake": 3, "sound": false, "nokia": true}')
+        write_file(_FILES[0], '{"snake": 9, "nokia": false}')
+        check("flash best", games.best("tetris"), 1200)
+        check("the card's higher best", games.best("snake"), 9)
+        check("flash switch where the card has none", games.option("sound", True), False)
+        check("the card's switch kept", games.option("nokia", True), False)
+        check("written to the card", (games.flush(), pu.load_json(_FILES[0])), (True, {"tetris": 1200, "snake": 9, "sound": False, "nokia": False}))
+        games._STORE[0] = None
+        games.store()
+        check("nothing new the next time", games._STORE[2], False)
+
+    with_store(body)
+
+
 # ── the pad ─────────────────────────────────────
 
 

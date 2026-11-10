@@ -94,7 +94,7 @@ Data files created automatically:
 - `/notes_data.json` → saved notes/todo items
 - `/weather_config.json` → location (lat, lon, name)
 - `/miniflux_config.json` → Miniflux URL + API key (optional)
-- `/sd/games.json` → the games' best scores and switches (on flash, `/games.json`, when there is no card; an old `/snake.json` is read once)
+- `/sd/games.json` → the games' best scores and switches (on flash, `/games.json`, when there is no card, joined to the card's once one is in; an old `/snake.json` is read once)
 - `/settings.json` → brightness, keyboard light, dim/screen-off delays, Wi-Fi at start (Settings)
 
 ## Launcher (standalone use)

@@ -140,7 +140,7 @@ These files are stored on the Pico's flash filesystem, not in the repo:
 - `/notes_data.json` — saved notes/todo items
 - `/weather_config.json` — location (lat, lon, name)
 - `/miniflux_config.json` — Miniflux URL + API key (optional)
-- `/sd/games.json` — the games' best scores, `sound` and `nokia` switches (`/games.json` on flash when there is no card, written only when a game is left; Snake's old `/snake.json` is read once, never written)
+- `/sd/games.json` — the games' best scores, `sound` and `nokia` switches (`/games.json` on flash when there is no card, written only when a game is left, and merged into the card's file once a card is in; Snake's old `/snake.json` is read once, never written)
 - `/settings.json` — brightness, keyboard light, `dim_s`, `sleep_s`, `wifi_sleep`, `autoconnect`, `wifi_last` (the network joined last, tried first)
 
 ## Testing
