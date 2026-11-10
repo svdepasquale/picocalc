@@ -25,7 +25,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-28.1"
+MODULE_VERSION = "2026-11-10.1"
 USER_AGENT = "PicoCalc"
 TIMEOUT = 15
 MAX_BYTES = 65536  # what .content reads at most
@@ -163,6 +163,8 @@ def split_url(url):
     port = 443 if scheme == "https" else 80
     if ":" in hostport:
         hostport, number = hostport.rsplit(":", 1)
+        if not number or [c for c in number if c not in "0123456789"]:
+            raise ValueError("bad port in URL")  # a user:pass@, an IPv6 address
         port = int(number)
     if not hostport:
         raise ValueError("no host in URL")
