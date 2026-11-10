@@ -8,7 +8,7 @@ import games
 from games import Pad as _Pad, Screen as _Screen, Sound as _Sound
 from pico_utils import sleep_ms as _sleep_ms, ticks_add as _ticks_add
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
-from pico_utils import BLACK, BGREEN, BRED, BWHITE, BYELLOW, GREEN, GREY, WHITE
+from pico_utils import BLACK, BGREEN, BRED, BWHITE, GREEN, GREY
 
 
 MODULE_VERSION = "2026-11-10.1"

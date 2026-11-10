@@ -10,7 +10,7 @@ from pico_utils import http_request as _http_request, net_error as _net_error
 from pico_utils import ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
 from pico_utils import screen_header as _screen_header, clear_screen as _clear_screen
 from pico_utils import DISPLAY_WIDTH
-from pico_utils import paint as _paint, GREY, BCYAN, BYELLOW
+from pico_utils import paint as _paint, GREY, BCYAN
 
 try:
     import ujson as json
@@ -33,7 +33,7 @@ AI_TIMEOUT = 60
 MAX_LINE_BYTES = 8192  # one streamed line
 MAX_STREAM_MS = 120000  # a reply that streams longer is stopped
 KEY_POLL_MS = 50  # q/Esc while a reply streams
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-11-10.1"
 MAX_HISTORY_MESSAGES = 6
 _HISTORY = []
 _MEMORY_ENABLED = True

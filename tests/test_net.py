@@ -642,7 +642,7 @@ def test_wifi_waits_out_stale_and_slow_statuses():
     def saved():
         check("stale 'wrong password' waited out", wifi_manager.connect_saved_networks(stale, {"home": "p1"}), True)
 
-    got = _with_wifi(stale, saved)
+    _with_wifi(stale, saved)
     check("one try", stale.joins, [("home", "p1")])
     slow = LateWlan([_scan_item(b"cafe", -50)], {"cafe": 3}, [2] * 20)  # 2 past the 8 s
 

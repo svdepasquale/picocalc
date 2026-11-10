@@ -15,7 +15,7 @@ from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
 from pico_utils import paint as _paint, poll_key as _poll_key, sort_by as _sort_by
 from pico_utils import screen_header as _screen_header, ticks_diff as _ticks_diff
 from pico_utils import ticks_add as _ticks_add, ticks_ms as _ticks_ms, wait_key as _wait_key
-from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
+from pico_utils import BCYAN, BRED, BYELLOW, GREY
 
 try:
     import ujson as json

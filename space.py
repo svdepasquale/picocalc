@@ -7,11 +7,10 @@ look, m the sound. The best score is kept on the SD card (games.py)."""
 import random
 
 import games
-import gfx
 from games import Clock as _Clock, Pad as _Pad, Screen as _Screen, Sound as _Sound
 from pico_utils import sleep_ms as _sleep_ms
-from pico_utils import BLACK, BLUE, BBLUE, BCYAN, BGREEN, BMAGENTA, BRED, BWHITE, BYELLOW
-from pico_utils import GREY, WHITE, YELLOW
+from pico_utils import BLACK, BBLUE, BCYAN, BGREEN, BMAGENTA, BRED, BWHITE, BYELLOW
+from pico_utils import GREY, WHITE
 
 try:
     import framebuf
