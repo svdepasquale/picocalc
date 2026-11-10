@@ -18,7 +18,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.4"
+MODULE_VERSION = "2026-11-10.1"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -1455,6 +1455,19 @@ def background_work():
     if _TICK[0] is not None:
         work.append(_TICK[0])
     return work
+
+
+def holds_work(mod, work):
+    """True if module mod holds one of work (background_work()): it stays
+    loaded. Unloaded, it frees nothing, since the work keeps its globals,
+    and a new import makes a second copy that can't reach the running one
+    (its stop_join() left the old join switching networks under a connect
+    by hand; the music went on with no player to stop it)."""
+    for value in mod.__dict__.values():
+        for fn in work:
+            if value is fn:
+                return True
+    return False
 
 
 def activity():

@@ -192,6 +192,17 @@ def test_app_discover_and_run():
         check("error comes back", apps.run_app(folder + "/boom.py"), False)
         keys_from(b" ")
         check("sys.exit comes back", apps.run_app(folder + "/leave.py"), True)
+        write_file(folder + "/_tmp_ticker.py", "import pico_utils\ndef tick():\n    pass\npico_utils.set_tick(tick)\n")
+        write_file(folder + "/keeps.py", "import _tmp_ticker, _tmp_helper\n")
+        keys_from(b" ")
+        try:
+            apps.run_app(folder + "/keeps.py")
+            kept = ("_tmp_ticker" in sys.modules, "_tmp_helper" in sys.modules)
+            check("a module holding the tick stays", kept, (True, False))
+        finally:
+            pu.set_tick(None)
+            sys.modules.pop("_tmp_ticker", None)
+            sys.modules.pop("_tmp_helper", None)
         check("missing dir", apps.discover((folder + "/nope",)), [])
     finally:
         pu._key_byte = REAL_KEY_BYTE
