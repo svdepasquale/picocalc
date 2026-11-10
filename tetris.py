@@ -1,6 +1,6 @@
 """Tetris: left/right move (held: they repeat), up or x turns, z turns back,
-down drops faster, Space drops, c holds a piece for later, p pauses, m turns
-the sound off and on, q quits. The best score is kept on the SD card
+down drops faster, Space drops, c holds a piece for later, p, Esc or q
+pause (then q quits), m turns the sound off and on. The best score is kept on the SD card
 (games.py)."""
 
 import random
@@ -12,7 +12,7 @@ from pico_utils import sleep_ms as _sleep_ms
 from pico_utils import BLACK, BLUE, BBLUE, BCYAN, BGREEN, BMAGENTA, BRED, BWHITE, BYELLOW
 from pico_utils import CYAN, GREEN, GREY, MAGENTA, RED, WHITE, YELLOW
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-11-10.1"
 
 W = 10
 H = 22  # 20 rows on screen under 2 hidden ones, where pieces come in
@@ -514,7 +514,7 @@ def help():
     print("-- Tetris --")
     print("play()  p()   left/right move, up/x turn, z back,")
     print("              down faster, Space drop, c hold,")
-    print("              p pause, m sound, q quit")
+    print("              p/q pause (then q quits), m sound")
     print("Best score: /sd/games.json")
 
 
