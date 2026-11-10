@@ -60,9 +60,9 @@ def ask(state, text, body=b"", stall=False):
 
 
 def test_names_and_decoding():
-    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 65, "b" * 255):
+    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 65, "b" * transfer.MAX_NAME):
         check("ok " + name[:10], transfer.valid_name(name), True)
-    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * 256, None):
+    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * (transfer.MAX_NAME + 1), None):
         check("bad " + repr(name)[:12], transfer.valid_name(name), False)
     check("percent", transfer.unquote("a%20b+c%C3%A8"), "a b c\xe8")
     check("broken percent kept", transfer.unquote("100%x%4"), "100%x%4")
@@ -163,6 +163,10 @@ def test_uploads():
         check("q stops it", ask(stopped, head.replace("new.bin", "q.bin"), b"abc")[0], 500)
         check("nothing left", "q.bin.part" in os.listdir(ROOT + "/music") or "q.bin" in os.listdir(ROOT + "/music"), False)
         check("logged", state["log"][0].startswith("got new.bin"), True)
+        longest = "n" * transfer.MAX_NAME
+        head = "PUT /api/put?dir=music&name={} HTTP/1.1\r\n{}Content-Length: 3\r\n\r\n".format(longest, pin)
+        check("longest name saved", (ask(state, head, b"abc")[0], longest in os.listdir(ROOT + "/music")), (200, True))
+        check("longer name refused", ask(state, head.replace(longest, longest + "n"), b"abc")[0], 400)
     finally:
         rm_tree(ROOT)
 
