@@ -214,6 +214,9 @@ def _safe_csi(text):
         if end >= n:
             break
         final = text[end]
+        if not "@" <= final <= "~":
+            i = end  # not a final byte (an ESC that starts another): drop it all
+            continue
         params = text[esc + 2 : end]
         i = end + 1
         if final == "r" or params.count(";") > 7:
