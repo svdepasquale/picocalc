@@ -205,7 +205,7 @@ def test_verify_policy():
         ("192.168.1.20", key, None, False),
         ("172.20.0.1", key, None, False),
         ("172.40.0.1", key, None, True),
-        ("evo-x2", key, None, False),
+        ("llm-box", key, None, False),
         ("nas.local", key, None, False),
         ("router.home.arpa", key, None, False),
         ("api.example.com", {"x-auth-token": "k"}, None, True),
