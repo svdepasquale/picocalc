@@ -3,7 +3,7 @@
 Thanks for considering a contribution. This toolkit runs MicroPython on the PicoCalc (Raspberry Pi Pico 2W) with a 320×320 screen and a tiny keyboard, so the constraints are unusual. Contributions are welcome as:
 
 - Bug reports (please include the Pico firmware version and a minimal reproducer)
-- New modules that fit the existing flat structure and the 32-char display width
+- New modules that fit the existing flat structure and the 52-column screen
 - Memory or performance improvements
 - Documentation and example improvements
 
@@ -11,8 +11,8 @@ Thanks for considering a contribution. This toolkit runs MicroPython on the Pico
 
 - **MicroPython, not CPython.** No f-strings, no `async`/`await` (unless the module is designed for it), no PyPI dependencies.
 - **Flat root layout.** All `.py` files must live in the repo root — MicroPython imports from `/` on the device.
-- **32 characters wide, 8 lines per page.** Output must fit without wrapping.
-- **Memory is tight** (~260 KB RAM). Call `gc.collect()` before large allocations and paginate long output.
+- **`DISPLAY_WIDTH` wide, `PAGE_LINES` per page** (from `pico_utils`: 52 columns and 25 lines on the device, 32x8 on the host fallback). Output must fit without wrapping.
+- **Memory is tight** (520 KB SRAM, ~50 KB of it the framebuffer). Call `gc.collect()` before large allocations and paginate long output.
 - **No hardcoded secrets.** Wi-Fi credentials and API keys go in JSON config files on flash.
 - **Every module exposes `ver()`, `help()`, `h()`** and a short alias for each interactive function.
 
