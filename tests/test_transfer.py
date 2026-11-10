@@ -90,12 +90,15 @@ def test_page_pin_and_lockout():
         status, body = ask(state, "GET / HTTP/1.1\r\n\r\n")
         check("page without a PIN", (status, b"PicoCalc SD" in body), (200, True))
         check("favicon is no strike", ask(state, "GET /favicon.ico HTTP/1.1\r\n\r\n")[0], 404)
+        replies = []
         for _ in range(transfer.MAX_STRIKES - 1):
-            ask(state, "GET /api/ls?dir= HTTP/1.1\r\nX-PIN: 000000\r\n\r\n")
+            replies.append(ask(state, "GET /api/ls?dir= HTTP/1.1\r\nX-PIN: 000000\r\n\r\n"))
         check("still open", state["stop"], None)
-        check("wrong PIN", ask(state, "GET /api/ls HTTP/1.1\r\n\r\n")[0], 401)
+        replies.append(ask(state, "GET /api/ls HTTP/1.1\r\n\r\n"))
+        check("wrong PIN", replies[-1][0], 401)
         check("closed after ten", state["stop"] is not None, True)
-        check("no PIN in replies", b"123456" in body, False)
+        check("no PIN in the page", b"123456" in body, False)
+        check("no PIN in the refusals", [r for r in replies if r[0] != 401 or b"123456" in r[1]], [])
         client = FakeClient(b"GET / HTTP/1.1\r\n\r\n")
         transfer.handle(client, new_state())
         check("never framed", b"frame-ancestors 'none'" in client.out, True)
