@@ -1,6 +1,6 @@
-# The OS layer of pico_utils: settings, the flash-write hold, clean() and the
-# terminal guard, the keyboard MCU's registers, dimming, the screen off and
-# background services.
+# The OS layer of pico_utils: settings, the refresh never stopped, clean()
+# and the terminal guard, the keyboard MCU's registers, dimming, the screen
+# off and background services.
 try:
     from harness import *
 except ImportError:

@@ -191,7 +191,8 @@ def _safe_csi(text):
     # to 1-39 and columns to 1-53: vtterminal.c takes a row or column of 0 as
     # -1 and draws outside the framebuffer (found with ASan on its source),
     # and a line feed on row 40 overflows it (see _set_margins). A sequence
-    # with more parameters than the 10 it keeps (vals[10]) is dropped too.
+    # with more than 7 separators is dropped too (vtterminal.c keeps 10
+    # parameters, vals[10]; the toolkit's longest CSI is 38;5;n).
     if "\x1b" not in text:
         return text
     out = []
@@ -1045,15 +1046,17 @@ def browse_items(
 
 # ── the panel refresh ───────────────────────────
 # Core1 pushes the framebuffer to the panel in a loop, from code in flash,
-# and the driver never lets MicroPython pause it for flash writes. Its only
-# lever, stopRefresh(), resets core1 wherever it is (recoverRefresh()
-# relaunches it): tried 2026-10-11 around every flash write, the device hung
-# twice in two device test runs (dozens of resets each; USB dead, power
-# cycle), also when the reset waited for core1 to be mid-frame. Saves in
-# normal use, unguarded since the toolkit began, never hung it; a copy
-# during a deploy did once (2026-10-06). So the toolkit never resets core1:
-# only tools/deploy.sh stops the refresh once, before a copy that ends in a
-# machine reset.
+# and the official driver never lets MicroPython pause it for flash writes:
+# on the official firmware a single save_json() to flash with the refresh on
+# hung the device for ~17 minutes (2026-10-12). The firmware rebuild
+# (tools/build_firmware.sh) locks core1 out of flash writes, which fixes it.
+# The driver's only lever, stopRefresh(), resets core1 wherever it is
+# (recoverRefresh() relaunches it): tried 2026-10-11 around every flash
+# write, the device hung twice in two device test runs (dozens of resets
+# each; USB dead, power cycle), also when the reset waited for core1 to be
+# mid-frame. So the toolkit never resets core1: only tools/deploy.sh (before
+# a copy that ends in a machine reset) and tools/stop_refresh.py (before each
+# device test file) stop the refresh, once.
 
 
 def _picocalc(name):

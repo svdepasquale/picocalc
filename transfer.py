@@ -23,7 +23,7 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-11-10.1"
 PORT = 80
 SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -465,8 +465,8 @@ def _upload(conn, state, headers, target, name):
     try:
         with open(part, "wb") as f:
             while left > 0:
-                # the buffer filled before each SD write: 4 KB writes, not one
-                # per TCP segment
+                # the buffer filled before each SD write: 8 KB writes (CHUNK),
+                # not one per TCP segment
                 want = min(len(buf), left)
                 n = 0
                 while n < want:
