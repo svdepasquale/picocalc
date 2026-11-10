@@ -14,7 +14,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like to see happen? Keep in mind the 32-char display and memory constraints.
+      description: What would you like to see happen? Keep in mind the 52-column screen and memory constraints.
     validations:
       required: true
 

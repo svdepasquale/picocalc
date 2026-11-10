@@ -1,6 +1,6 @@
-"""Snake for the PicoCalc keyboard: arrows or WASD steer, p pauses, m turns
-the sound off and on, q quits. The best score is kept on the SD card
-(games.py): the old snake.json on flash is read once, never written."""
+"""Snake for the PicoCalc keyboard: arrows or WASD steer, p, Esc or q pause
+(then q quits), m turns the sound off and on. The best score is kept on the
+SD card (games.py): the old snake.json on flash is read once, never written."""
 
 import random
 
@@ -8,10 +8,10 @@ import games
 from games import Pad as _Pad, Screen as _Screen, Sound as _Sound
 from pico_utils import sleep_ms as _sleep_ms, ticks_add as _ticks_add
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
-from pico_utils import BLACK, BGREEN, BRED, BWHITE, BYELLOW, GREEN, GREY, WHITE
+from pico_utils import BLACK, BGREEN, BRED, BWHITE, GREEN, GREY
 
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-11-10.1"
 START_MS = 150  # time per step at the start
 FASTEST_MS = 60
 SPEEDUP_MS = 4  # per food eaten
@@ -173,7 +173,7 @@ def _draw(fb, state, best):
     games.gfx.key_bar(_KEYS, 320 - games._keys_width(_KEYS) - 4, _STATUS_Y)
 
 
-_KEYS = tuple((games.gfx.cp(k), games.gfx.cp(v)) for k, v in (("p", "pause"), ("m", "sound"), ("q", "quit")))
+_KEYS = tuple((games.gfx.cp(k), games.gfx.cp(v)) for k, v in (("p", "pause"), ("m", "sound")))
 
 
 def _crash(fb, cell):
@@ -261,8 +261,8 @@ def ver():
 
 def help():
     print("-- Snake --")
-    print("play()  p()  Arrows/WASD steer, p pause,")
-    print("             m sound, q quit")
+    print("play()  p()  Arrows/WASD steer, p/q pause")
+    print("             (then q quits), m sound")
     print("Best score: /sd/games.json")
 
 

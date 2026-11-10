@@ -15,7 +15,7 @@ from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
 from pico_utils import paint as _paint, poll_key as _poll_key, sort_by as _sort_by
 from pico_utils import screen_header as _screen_header, ticks_diff as _ticks_diff
 from pico_utils import ticks_add as _ticks_add, ticks_ms as _ticks_ms, wait_key as _wait_key
-from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
+from pico_utils import BCYAN, BRED, BYELLOW, GREY
 
 try:
     import ujson as json
@@ -23,13 +23,13 @@ except ImportError:
     import json
 
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-11-10.1"
 PORT = 80
 SD_ROOT = "/sd"
 MAX_UPLOAD = 64 * 1024 * 1024
 MAX_HEAD = 4096  # request line and headers
 MAX_HEADERS = 30
-MAX_NAME = 255  # FAT's longest name
+MAX_NAME = 250  # FAT's longest name is 255: an upload writes name + ".part" first
 MAX_LIST = 400  # files listed per folder
 CHUNK = 8192  # SD writes of 8 KB: 270 KB/s up, 4 KB gave 185 (measured)
 WAIT = 0.25  # seconds per socket wait: q/Esc and the deadlines are checked between
@@ -465,8 +465,8 @@ def _upload(conn, state, headers, target, name):
     try:
         with open(part, "wb") as f:
             while left > 0:
-                # the buffer filled before each SD write: 4 KB writes, not one
-                # per TCP segment
+                # the buffer filled before each SD write: 8 KB writes (CHUNK),
+                # not one per TCP segment
                 want = min(len(buf), left)
                 n = 0
                 while n < want:

@@ -1,24 +1,23 @@
 """Space Raid: a side-scrolling shooter after the old Nokia's Space Impact.
 Arrows fly the ship, Space (or x, z) fires while held, c (or v, Enter)
 fires the special weapon the pods give: missiles or a beam. A boss closes
-every level. p pauses, n switches the Nokia LCD look, m the sound, q quits.
-The best score is kept on the SD card (games.py)."""
+every level. p, Esc or q pause (then q quits), n switches the Nokia LCD
+look, m the sound. The best score is kept on the SD card (games.py)."""
 
 import random
 
 import games
-import gfx
 from games import Clock as _Clock, Pad as _Pad, Screen as _Screen, Sound as _Sound
 from pico_utils import sleep_ms as _sleep_ms
-from pico_utils import BLACK, BLUE, BBLUE, BCYAN, BGREEN, BMAGENTA, BRED, BWHITE, BYELLOW
-from pico_utils import GREY, WHITE, YELLOW
+from pico_utils import BLACK, BBLUE, BCYAN, BGREEN, BMAGENTA, BRED, BWHITE, BYELLOW
+from pico_utils import GREY, WHITE
 
 try:
     import framebuf
 except ImportError:  # CPython: the game logic only
     framebuf = None
 
-MODULE_VERSION = "2026-10-12.1"
+MODULE_VERSION = "2026-11-10.1"
 
 S = 3  # screen pixels per game pixel: the Nokia's chunky look
 FW = 106  # field, in game pixels
@@ -752,7 +751,7 @@ def help():
     print("-- Space Raid --")
     print("play()  p()   arrows fly, Space fires,")
     print("              c special, p pause, n Nokia look,")
-    print("              m sound, q quit")
+    print("              m sound, q pause (then q quits)")
     print("Best score: /sd/games.json")
 
 

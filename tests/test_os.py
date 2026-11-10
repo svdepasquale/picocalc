@@ -1,6 +1,6 @@
-# The OS layer of pico_utils: settings, the flash-write hold, clean() and the
-# terminal guard, the keyboard MCU's registers, dimming, the screen off and
-# background services.
+# The OS layer of pico_utils: settings, the refresh never stopped, clean()
+# and the terminal guard, the keyboard MCU's registers, dimming, the screen
+# off and background services.
 try:
     from harness import *
 except ImportError:
@@ -121,6 +121,11 @@ def test_safe_csi_guards_the_terminal():
     check("cut sequence dropped", pu._safe_csi("ab\x1b[12"), "ab")
     check("safe row kept", pu._safe_csi("\x1b[3;1Hx"), "\x1b[3;1Hx")
     check("terminal reset dropped", pu._safe_csi("a\x1bcb"), "ab")
+    rows = pu._TERM_ROWS
+    check("cut by ESC, row clamped", pu._safe_csi("\x1b[\x1b[{};1H\n".format(rows)), "\x1b[{};1H\n".format(last))
+    check("cut by ESC, margins dropped", pu._safe_csi("a\x1b[\x1b[1;{}rb".format(rows)), "ab")
+    check("cut by ESC, reset dropped", pu._safe_csi("a\x1b[\x1bcb"), "ab")
+    check("cut by ESC, row 0", pu._safe_csi("\x1b[5\x1b[0;0H"), "\x1b[1;1H")
     vt = FakeVt()
     pu._ScreenTerm(vt).write(b"T\x1b[1;99r\x1b[99;1H\n")
     check("writer guarded", vt.drawn, ["T\x1b[{};1H\n".format(last)])

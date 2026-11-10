@@ -24,7 +24,7 @@ WLAN_WARMUP_MS = 800
 SCAN_RETRY_COUNT = 2
 SCAN_RETRY_DELAY_MS = 1200
 MAX_CONNECT_CANDIDATES = 2
-WIFI_MANAGER_VERSION = "2026-10-12.2"
+WIFI_MANAGER_VERSION = "2026-11-10.1"
 _NETWORK_MODULE = None
 
 # wlan.status() in words, for the WiFi screen and failed connects: the rp2
@@ -98,7 +98,7 @@ def load_credentials():
 
 
 def save_credentials(credentials):
-    # through .tmp/.bak, with the panel refresh held (pico_utils.save_json)
+    # through .tmp/.bak (pico_utils.save_json)
     return _save_json(CREDENTIALS_FILE, credentials)
 
 

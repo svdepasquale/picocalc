@@ -16,17 +16,17 @@ import sys
 from pico_utils import DISPLAY_WIDTH
 from pico_utils import clean as _clean
 from pico_utils import bar as _bar, clear_screen as _clear_screen, clip as _clip
-from pico_utils import format_bytes as _format_bytes, key_bar as _key_bar
+from pico_utils import format_bytes as _format_bytes
 from pico_utils import paint as _paint, pick as _pick, poll_key as _poll_key
 from pico_utils import screen_header as _screen_header, sleep_ms as _sleep_ms
 from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
-from pico_utils import title_bar as _title_bar, wait_key as _wait_key
+from pico_utils import wait_key as _wait_key
 from pico_utils import set_status_extra as _set_status_extra, set_tick as _set_tick
 from pico_utils import sort_by as _sort_by
 from pico_utils import BCYAN, BGREEN, BRED, BYELLOW, GREY
 
 
-MODULE_VERSION = "2026-10-12.3"
+MODULE_VERSION = "2026-11-10.1"
 MUSIC_DIRS = ("/sd/music", "/sd")
 FRAMES = 4096  # samples per DMA buffer: 186 ms at 22,050 Hz
 STEP = 1024  # samples read and converted per pump step

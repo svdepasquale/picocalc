@@ -68,7 +68,13 @@ jobs:
 
               let deleteReason = null;
               if (closedPulls.length > 0 && closedPulls[0].merged_at) {
-                deleteReason = 'merged pull request';
+                // only the commits that were merged: a branch pushed again
+                // after its merge carries work that is nowhere else
+                if (branch.commit.sha === closedPulls[0].head.sha) {
+                  deleteReason = 'merged pull request';
+                } else {
+                  console.log(`Keeping merged branch with new commits: ${branch.name}`);
+                }
               } else if (closedPulls.length > 0) {
                 try {
                   const { data: branchCommit } = await github.rest.git.getCommit({

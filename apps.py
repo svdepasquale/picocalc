@@ -10,10 +10,11 @@ import sys
 from pico_utils import clear_screen as _clear_screen, ensure_screen as _ensure_screen
 from pico_utils import paint as _paint, pick as _pick, screen_header as _screen_header
 from pico_utils import clean as _clean, sort_by as _sort_by, wait_key as _wait_key
+from pico_utils import background_work as _background_work, holds_work as _holds_work
 from pico_utils import _CONSOLE, GREY
 
 
-MODULE_VERSION = "2026-10-12.3"
+MODULE_VERSION = "2026-11-10.1"
 APP_DIRS = ("/sd/apps", "/apps")
 HEADER = "# picocalc-app:"
 HEADER_LINES = 5  # the header is looked for in the first lines only
@@ -112,8 +113,9 @@ def _take_screen():
 
 def run_app(path, name=None):
     """Run one app file as __main__. q in the app, an error, sys.exit() or
-    Ctrl+C come back here; modules it imported are dropped afterwards, the
-    working directory and the launcher's screen console are put back."""
+    Ctrl+C come back here; modules it imported are dropped afterwards (not
+    one left holding a service or the tick), the working directory and the
+    launcher's screen console are put back."""
     folder = path.rsplit("/", 1)[0] or "/"
     added = folder not in sys.path
     if added:
@@ -134,8 +136,9 @@ def run_app(path, name=None):
         failure = error
         ended = "error in"
     finally:
+        work = _background_work()  # a module the app left running stays (the music)
         for module in list(sys.modules):
-            if module not in loaded:
+            if module not in loaded and not _holds_work(sys.modules[module], work):
                 del sys.modules[module]
         if added and folder in sys.path:
             sys.path.remove(folder)

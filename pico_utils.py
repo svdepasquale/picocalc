@@ -18,7 +18,7 @@ HTTP_TIMEOUT = 15
 USER_AGENT = "PicoCalc"
 CLOCK_CONFIG_FILE = "clock_config.json"
 MIN_SYNCED_YEAR = 2024
-MODULE_VERSION = "2026-10-12.4"
+MODULE_VERSION = "2026-11-10.1"
 
 _QUIT_KEYS = ("q", "Q", "esc", "eof")
 _ESC_WAIT_MS = 30
@@ -191,7 +191,8 @@ def _safe_csi(text):
     # to 1-39 and columns to 1-53: vtterminal.c takes a row or column of 0 as
     # -1 and draws outside the framebuffer (found with ASan on its source),
     # and a line feed on row 40 overflows it (see _set_margins). A sequence
-    # with more parameters than the 10 it keeps (vals[10]) is dropped too.
+    # with more than 7 separators is dropped too (vtterminal.c keeps 10
+    # parameters, vals[10]; the toolkit's longest CSI is 38;5;n).
     if "\x1b" not in text:
         return text
     out = []
@@ -214,6 +215,9 @@ def _safe_csi(text):
         if end >= n:
             break
         final = text[end]
+        if not "@" <= final <= "~":
+            i = end  # not a final byte (an ESC that starts another): drop it all
+            continue
         params = text[esc + 2 : end]
         i = end + 1
         if final == "r" or params.count(";") > 7:
@@ -1042,15 +1046,17 @@ def browse_items(
 
 # ── the panel refresh ───────────────────────────
 # Core1 pushes the framebuffer to the panel in a loop, from code in flash,
-# and the driver never lets MicroPython pause it for flash writes. Its only
-# lever, stopRefresh(), resets core1 wherever it is (recoverRefresh()
-# relaunches it): tried 2026-10-11 around every flash write, the device hung
-# twice in two device test runs (dozens of resets each; USB dead, power
-# cycle), also when the reset waited for core1 to be mid-frame. Saves in
-# normal use, unguarded since the toolkit began, never hung it; a copy
-# during a deploy did once (2026-10-06). So the toolkit never resets core1:
-# only tools/deploy.sh stops the refresh once, before a copy that ends in a
-# machine reset.
+# and the official driver never lets MicroPython pause it for flash writes:
+# on the official firmware a single save_json() to flash with the refresh on
+# hung the device for ~17 minutes (2026-10-12). The firmware rebuild
+# (tools/build_firmware.sh) locks core1 out of flash writes, which fixes it.
+# The driver's only lever, stopRefresh(), resets core1 wherever it is
+# (recoverRefresh() relaunches it): tried 2026-10-11 around every flash
+# write, the device hung twice in two device test runs (dozens of resets
+# each; USB dead, power cycle), also when the reset waited for core1 to be
+# mid-frame. So the toolkit never resets core1: only tools/deploy.sh (before
+# a copy that ends in a machine reset) and tools/stop_refresh.py (before each
+# device test file) stop the refresh, once.
 
 
 def _picocalc(name):
@@ -1452,6 +1458,19 @@ def background_work():
     if _TICK[0] is not None:
         work.append(_TICK[0])
     return work
+
+
+def holds_work(mod, work):
+    """True if module mod holds one of work (background_work()): it stays
+    loaded. Unloaded, it frees nothing, since the work keeps its globals,
+    and a new import makes a second copy that can't reach the running one
+    (its stop_join() left the old join switching networks under a connect
+    by hand; the music went on with no player to stop it)."""
+    for value in mod.__dict__.values():
+        for fn in work:
+            if value is fn:
+                return True
+    return False
 
 
 def activity():

@@ -15,7 +15,7 @@
 ## Checklist
 
 - [ ] Code runs on MicroPython (no CPython-only constructs: no `async`/`await` unless intentional, no f-strings, no PyPI imports)
-- [ ] Output fits within 32-char width and paginates long content
+- [ ] Output fits `DISPLAY_WIDTH` (52 columns on the device) and paginates long content by `PAGE_LINES`
 - [ ] `MODULE_VERSION` bumped on every modified file
 - [ ] `ver()`, `help()`, and `h()` still work for any modified module
 - [ ] Tested on a PicoCalc + Pico 2W (board and firmware version noted below)

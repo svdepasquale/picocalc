@@ -60,9 +60,9 @@ def ask(state, text, body=b"", stall=False):
 
 
 def test_names_and_decoding():
-    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 65, "b" * 255):
+    for name in ("song.wav", "Caff\xe8 1.txt", "a" * 65, "b" * transfer.MAX_NAME):
         check("ok " + name[:10], transfer.valid_name(name), True)
-    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * 256, None):
+    for name in ("", ".", "..", ".hidden", "a/b", "a\\b", "x\x1b[2J", "a" * (transfer.MAX_NAME + 1), None):
         check("bad " + repr(name)[:12], transfer.valid_name(name), False)
     check("percent", transfer.unquote("a%20b+c%C3%A8"), "a b c\xe8")
     check("broken percent kept", transfer.unquote("100%x%4"), "100%x%4")
@@ -90,12 +90,15 @@ def test_page_pin_and_lockout():
         status, body = ask(state, "GET / HTTP/1.1\r\n\r\n")
         check("page without a PIN", (status, b"PicoCalc SD" in body), (200, True))
         check("favicon is no strike", ask(state, "GET /favicon.ico HTTP/1.1\r\n\r\n")[0], 404)
+        replies = []
         for _ in range(transfer.MAX_STRIKES - 1):
-            ask(state, "GET /api/ls?dir= HTTP/1.1\r\nX-PIN: 000000\r\n\r\n")
+            replies.append(ask(state, "GET /api/ls?dir= HTTP/1.1\r\nX-PIN: 000000\r\n\r\n"))
         check("still open", state["stop"], None)
-        check("wrong PIN", ask(state, "GET /api/ls HTTP/1.1\r\n\r\n")[0], 401)
+        replies.append(ask(state, "GET /api/ls HTTP/1.1\r\n\r\n"))
+        check("wrong PIN", replies[-1][0], 401)
         check("closed after ten", state["stop"] is not None, True)
-        check("no PIN in replies", b"123456" in body, False)
+        check("no PIN in the page", b"123456" in body, False)
+        check("no PIN in the refusals", [r for r in replies if r[0] != 401 or b"123456" in r[1]], [])
         client = FakeClient(b"GET / HTTP/1.1\r\n\r\n")
         transfer.handle(client, new_state())
         check("never framed", b"frame-ancestors 'none'" in client.out, True)
@@ -163,6 +166,10 @@ def test_uploads():
         check("q stops it", ask(stopped, head.replace("new.bin", "q.bin"), b"abc")[0], 500)
         check("nothing left", "q.bin.part" in os.listdir(ROOT + "/music") or "q.bin" in os.listdir(ROOT + "/music"), False)
         check("logged", state["log"][0].startswith("got new.bin"), True)
+        longest = "n" * transfer.MAX_NAME
+        head = "PUT /api/put?dir=music&name={} HTTP/1.1\r\n{}Content-Length: 3\r\n\r\n".format(longest, pin)
+        check("longest name saved", (ask(state, head, b"abc")[0], longest in os.listdir(ROOT + "/music")), (200, True))
+        check("longer name refused", ask(state, head.replace(longest, longest + "n"), b"abc")[0], 400)
     finally:
         rm_tree(ROOT)
 

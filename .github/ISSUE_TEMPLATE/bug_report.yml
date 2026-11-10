@@ -22,6 +22,8 @@ body:
       label: Affected module
       options:
         - pico_utils
+        - gfx / gfx_native
+        - pico_net
         - wifi_manager
         - openrouter_ai
         - rss_news
@@ -29,9 +31,20 @@ body:
         - notes
         - weather
         - scientific_calc
-        - mp3_player
+        - music
         - synthesizer
         - sys_status
+        - menu
+        - go / main / default_style (start)
+        - files
+        - apps
+        - games
+        - snake
+        - tetris
+        - space
+        - settings
+        - cal
+        - transfer
         - multiple / not sure
     validations:
       required: true

@@ -7,6 +7,9 @@
 #   test_games.py   the games list and scores, the key pad, Snake, Tetris, Space Raid
 #   test_os.py      pico_utils' OS layer: settings, power, idle
 #   test_music.py   music: WAV, conversion, playback on a DMA model, background
+#   test_http.py    pico_net
+#   test_transfer.py  the transfer server
+#   test_cal.py     the calendar
 # Run one from the repo root with either interpreter:
 #   python3 tests/test_core.py
 #   micropython tests/test_core.py

@@ -20,7 +20,7 @@ from pico_utils import ticks_diff as _ticks_diff, ticks_ms as _ticks_ms
 from pico_utils import _TICK, _picocalc, _stdin_poll, _terminal, _tick
 from pico_utils import BLACK, BCYAN, BGREEN, BRED, BWHITE, BYELLOW, GREY, WHITE
 
-MODULE_VERSION = "2026-10-12.2"
+MODULE_VERSION = "2026-11-10.1"
 
 # (module, name, what it is)
 GAMES = (
@@ -35,7 +35,8 @@ _BACK = ("q", "Q", "esc", "eof", "left")
 # One small JSON file for every game: {"sound": true, "snake": 12, ...}. On
 # the SD card when there is one: SD writes go over SPI and leave the flash
 # (and core1, which refreshes the panel from it) alone. Without a card it
-# falls back to flash, written once when a game is left, not after each one.
+# falls back to flash, written once when a game is left, not after each one;
+# what it holds joins the card's file when a card is in.
 
 SD_DIR = "/sd"
 SD_FILE = "/sd/games.json"
@@ -66,6 +67,7 @@ def store():
         data = _load_json(path)
         if not isinstance(data, dict):
             data = {}
+        changed = path == SD_FILE and _merge_flash(data)
         if "snake" not in data:
             old = _load_json(OLD_SNAKE)
             if isinstance(old, dict):
@@ -74,8 +76,27 @@ def store():
                     data["sound"] = bool(old["sound"])
         _STORE[0] = data
         _STORE[1] = path
-        _STORE[2] = False
+        _STORE[2] = changed
     return _STORE[0]
+
+
+def _merge_flash(data):
+    # What was saved without a card joins the card's: the higher score of
+    # each game, a switch only where the card has none. True if it added any.
+    flash = _load_json(FLASH_FILE)
+    if not isinstance(flash, dict):
+        return False
+    ids = [game[0] for game in GAMES]
+    changed = False
+    for key, value in flash.items():
+        if key in ids:
+            if _int(value) > _int(data.get(key)):
+                data[key] = _int(value)
+                changed = True
+        elif key not in data:
+            data[key] = value
+            changed = True
+    return changed
 
 
 def best(game):

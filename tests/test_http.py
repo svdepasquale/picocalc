@@ -155,6 +155,14 @@ def test_join_url():
     except ValueError as error:
         got = str(error)
     check("no server text in errors", got, "not a URL")
+    got = []
+    for url in ("http://u:\x1b[2J@h.org/", "http://h.org:/", "http://[::1]/", "http://h.org:8x/"):
+        try:
+            pico_net.split_url(url)
+            got.append("parsed")
+        except ValueError as error:
+            got.append(str(error))
+    check("bad ports: no URL text in errors", got, ["bad port in URL"] * 4)
 
 
 def test_caps_and_refusals():
@@ -205,7 +213,7 @@ def test_verify_policy():
         ("192.168.1.20", key, None, False),
         ("172.20.0.1", key, None, False),
         ("172.40.0.1", key, None, True),
-        ("evo-x2", key, None, False),
+        ("llm-box", key, None, False),
         ("nas.local", key, None, False),
         ("router.home.arpa", key, None, False),
         ("api.example.com", {"x-auth-token": "k"}, None, True),
