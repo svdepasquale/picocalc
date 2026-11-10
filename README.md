@@ -338,8 +338,9 @@ Read the unread entries of your own Miniflux in the same viewer:
 - `n.mf_done()` → mark the fetched entries as read on the server
 
 Create a dedicated API key for the PicoCalc (Miniflux: Settings → API Keys):
-it is stored in plain text on flash, and MicroPython's `requests` does not
-verify TLS certificates. Revoke it if the device is lost. A 401 stops at
+it is stored in plain text on flash. It goes only over verified TLS to a
+server on the internet (pico_net's roots; a server on the LAN is not
+checked). Revoke it if the device is lost. A 401 stops at
 once without retrying. Long articles are fetched one at a time.
 
 ## System status
@@ -543,7 +544,7 @@ Commands:
 2. Switch the PicoCalc off and on: the launcher opens (or type `import go`).
    Press `1`, then `c` to pick a Wi-Fi network; the clock is set from NTP
    once connected, and at later starts the launcher joins it by itself.
-3. `8` (Clock) → `z`: UTC offset `1` and `y` for EU summer time (Italy).
+3. `8` (Clock) → `z` → `1` (Italy: UTC+1 with EU summer time).
 
 ## Synthesizer
 Software tone/note synthesizer. Supports PWM output (built-in PicoCalc speakers) and I2S output (external DAC).
