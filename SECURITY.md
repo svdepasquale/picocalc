@@ -7,7 +7,7 @@ If you discover a security vulnerability in this toolkit, please **do not** open
 Instead, report it privately via one of:
 
 - GitHub Security Advisories: [create a private advisory](https://github.com/svdepasquale/picocalc/security/advisories/new)
-- Email: `silvio.depasquale@pm.me`
+- Email: `silvio@depasquale.dev`
 
 Please include:
 
@@ -30,9 +30,9 @@ In scope:
 Out of scope:
 
 - Physical access attacks (the device runs MicroPython on unauthenticated flash)
-- Issues in upstream MicroPython or `mip`-installed packages (`urequests`, `ntptime`) — report to the respective projects
+- Issues in upstream MicroPython or `mip`-installed packages (`ntptime`) — report to the respective projects
 - Wi-Fi credentials stored in plaintext on flash — this is a known limitation of the target hardware and documented behavior
 
 ## Secrets
 
-API keys (OpenRouter) and Wi-Fi credentials are stored in JSON files on the device's flash. Do not commit these files, and do not share device images without wiping `/wifi_credentials.json` and `/openrouter_config.json`.
+API keys (OpenRouter, Miniflux) and Wi-Fi credentials are stored in JSON files on the device's flash. Do not commit these files, and do not share device images without wiping `/wifi_credentials.json`, `/openrouter_config.json` and `/miniflux_config.json`.
